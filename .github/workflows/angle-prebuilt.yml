@@ -128,6 +128,7 @@ jobs:
             g++ \
             libasound2-dev \
             libdrm-dev \
+            libglib2.0-dev \
             libgl1-mesa-dev \
             libx11-dev \
             libxcomposite-dev \
