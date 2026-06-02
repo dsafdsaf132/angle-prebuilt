@@ -6,13 +6,13 @@ on:
       angle_ref:
         description: ANGLE branch, tag, or ref to build.
         required: true
-        default: chromium/7151
+        default: main
       angle_commit:
         description: Optional ANGLE commit SHA. Empty builds angle_ref HEAD.
         required: false
         default: ""
       release_tag:
-        description: Optional GitHub Release tag. Empty means build only.
+        description: Optional GitHub Release tag override. Empty uses angle-{commitPosition}.
         required: false
         default: ""
   schedule:
@@ -417,7 +417,7 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+      github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
     steps:
@@ -438,8 +438,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            tag="${{ inputs.release_tag }}"
+          explicit_tag="${{ inputs.release_tag }}"
+          if [[ -n "$explicit_tag" ]]; then
+            tag="$explicit_tag"
           else
             asset="$(find release-assets -maxdepth 1 -type f -name 'angle-*-linux-x64.tar.gz' | head -n 1)"
             if [[ -z "$asset" ]]; then
@@ -453,13 +454,18 @@ jobs:
               echo "::error::Unexpected archive name: $name"
               exit 1
             fi
-            if [[ "$version" != main-* ]]; then
+            if [[ "${{ github.event_name }}" == "schedule" && "$version" != main-* ]]; then
               echo "::error::Scheduled release expected main-* version, got $version"
               exit 1
             fi
             tag="angle-$version"
           fi
           echo "Release tag: $tag"
+          if [[ -n "$explicit_tag" ]]; then
+            echo "RELEASE_TAG_EXPLICIT=1" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_TAG_EXPLICIT=0" >> "$GITHUB_ENV"
+          fi
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
 
       - name: Prepare release notes
@@ -483,8 +489,8 @@ jobs:
           if git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null; then
             tag_commit="$(git rev-parse "refs/tags/$tag^{commit}")"
             if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
-              if [[ "${{ github.event_name }}" == "schedule" ]]; then
-                echo "Tag $tag already points to $tag_commit; reusing it for scheduled asset upload"
+              if [[ "$RELEASE_TAG_EXPLICIT" != "1" ]]; then
+                echo "Tag $tag already points to $tag_commit; reusing it for commit-position asset upload"
               else
                 echo "::error::Tag $tag points to $tag_commit, not workflow commit $GITHUB_SHA"
                 exit 1

@@ -45,12 +45,12 @@ Inputs:
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `angle_ref` | `chromium/7151` | ANGLE branch, tag, or ref to build |
+| `angle_ref` | `main` | ANGLE branch, tag, or ref to build |
 | `angle_commit` | empty | Optional exact ANGLE commit |
-| `release_tag` | empty | Optional GitHub Release tag |
+| `release_tag` | empty | Optional GitHub Release tag override |
 
-Push and pull request runs build and verify only. A manual run publishes release
-assets only when `release_tag` is set.
+Push and pull request runs build and verify only. Manual and scheduled runs
+publish release assets by default using the ANGLE commit position.
 
 The scheduled run builds upstream ANGLE `main` every Sunday at 00:00 UTC and
 publishes `angle-main-{commitPosition}`.

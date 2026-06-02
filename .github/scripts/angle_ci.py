@@ -284,10 +284,6 @@ def write_gn_args(args):
 
 def parse_angle_version(source_root, angle_ref):
     normalized_ref = (angle_ref or "").removeprefix("refs/heads/")
-    match = re.search(r"(?:^|/)(\d{4,})(?:$|[-_/])", angle_ref or "")
-    if match:
-        return match.group(1)
-
     commit_id = Path(source_root) / "src" / "commit_id.py"
     if commit_id.exists():
         try:
@@ -300,6 +296,10 @@ def parse_angle_version(source_root, angle_ref):
                 return version
         except subprocess.SubprocessError:
             pass
+
+    match = re.search(r"(?:^|/)(\d{4,})(?:$|[-_/])", angle_ref or "")
+    if match:
+        return match.group(1)
 
     try:
         short_commit = subprocess.check_output(
