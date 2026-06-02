@@ -60,6 +60,9 @@ previous run's `angle-*` artifacts.
 The scheduled run builds upstream ANGLE `main` every Sunday at 00:00 UTC and
 publishes `angle-main-{commitPosition}`.
 
+The **Sync Fork** workflow updates the fork from upstream ANGLE `main` every
+Saturday at 23:00 UTC.
+
 ## License
 
 ANGLE is distributed under the BSD-style license in `LICENSE`.

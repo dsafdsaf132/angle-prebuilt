@@ -1,0 +1,70 @@
+name: Sync Fork
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Upstream ANGLE ref to merge.
+        required: true
+        default: main
+      target_branch:
+        description: Fork branch to update.
+        required: true
+        default: main
+  schedule:
+    - cron: "0 23 * * 6"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-fork-${{ github.event_name == 'workflow_dispatch' && inputs.target_branch || 'main' }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: sync-fork
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.upstream_ref || 'main' }}
+      TARGET_BRANCH: ${{ github.event_name == 'workflow_dispatch' && inputs.target_branch || 'main' }}
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.target_branch || 'main' }}
+
+      - name: Merge upstream ANGLE
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote add upstream https://chromium.googlesource.com/angle/angle.git 2>/dev/null || \
+            git remote set-url upstream https://chromium.googlesource.com/angle/angle.git
+          git fetch origin "$TARGET_BRANCH"
+          git fetch upstream "$UPSTREAM_REF"
+
+          upstream_commit="$(git rev-parse FETCH_HEAD)"
+          current_commit="$(git rev-parse HEAD)"
+          echo "Target branch: $TARGET_BRANCH"
+          echo "Current fork commit: $current_commit"
+          echo "Upstream ref: $UPSTREAM_REF"
+          echo "Upstream commit: $upstream_commit"
+
+          if git merge-base --is-ancestor "$upstream_commit" HEAD; then
+            echo "Fork already contains upstream commit $upstream_commit"
+            exit 0
+          fi
+
+          if ! git merge --no-edit -m "chore(sync): merge upstream ANGLE $UPSTREAM_REF" "$upstream_commit"; then
+            echo "::error::Upstream sync produced merge conflicts. Resolve locally, push, then rerun this workflow."
+            git status --short
+            exit 1
+          fi
+
+          new_commit="$(git rev-parse HEAD)"
+          echo "New fork commit: $new_commit"
+          git push origin "HEAD:$TARGET_BRANCH"
