@@ -94,6 +94,8 @@ PLATFORM_GN_ARGS = {
 
 SMOKE_SOURCE = r"""
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <EGL/eglext_angle.h>
 #include <GLES3/gl3.h>
 #include <cstdio>
 #include <cstdlib>
@@ -104,19 +106,58 @@ static void fail(const char *message)
     std::exit(1);
 }
 
+static EGLDisplay getAnglePlatformDisplay()
+{
+    auto getPlatformDisplay =
+        reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
+            eglGetProcAddress("eglGetPlatformDisplayEXT"));
+    if (getPlatformDisplay == nullptr)
+    {
+        return EGL_NO_DISPLAY;
+    }
+
+#if defined(_WIN32)
+    const EGLint displayAttribs[] = {
+        EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE,
+        EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_DEVICE_TYPE_D3D_WARP_ANGLE,
+        EGL_NONE,
+    };
+#elif defined(__APPLE__)
+    const EGLint displayAttribs[] = {
+        EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE,
+        EGL_NONE,
+    };
+#elif defined(__linux__)
+    const EGLint displayAttribs[] = {
+        EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE,
+        EGL_NONE,
+    };
+#else
+    const EGLint displayAttribs[] = {EGL_NONE};
+#endif
+
+    return getPlatformDisplay(EGL_PLATFORM_ANGLE_ANGLE,
+                              reinterpret_cast<void *>(EGL_DEFAULT_DISPLAY),
+                              displayAttribs);
+}
+
 int main()
 {
     EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    if (display == EGL_NO_DISPLAY)
-    {
-        fail("eglGetDisplay failed");
-    }
 
     EGLint major = 0;
     EGLint minor = 0;
-    if (!eglInitialize(display, &major, &minor))
+    if (display == EGL_NO_DISPLAY || !eglInitialize(display, &major, &minor))
     {
-        fail("eglInitialize failed");
+        display = getAnglePlatformDisplay();
+        if (display == EGL_NO_DISPLAY)
+        {
+            fail("eglGetDisplay/eglGetPlatformDisplayEXT failed");
+        }
+        if (!eglInitialize(display, &major, &minor))
+        {
+            fail("eglInitialize failed");
+        }
     }
 
     EGLint configAttribs[] = {
@@ -593,22 +634,36 @@ def prepend_env_path(current, value):
 
 def run_windows_smoke(smoke_cpp, include_dir, lib_dir, arch):
     vcvars = find_vcvarsall()
-    vc_arch = "arm64" if arch == "arm64" else "x64"
+    host_arch = os.environ.get("PROCESSOR_ARCHITECTURE", "").upper()
+    vc_arch = "x64"
+    if arch == "arm64":
+        vc_arch = "arm64" if host_arch == "ARM64" else "x64_arm64"
     exe = smoke_cpp.parent / "angle-smoke.exe"
-    command = (
-        f'call "{vcvars}" {vc_arch} && '
-        f'cl /nologo /EHsc /I "{include_dir}" "{smoke_cpp}" '
-        f'/link /LIBPATH:"{lib_dir}" libEGL.lib libGLESv2.lib /OUT:"{exe}"'
-    )
-    if arch == "arm64" and os.environ.get("PROCESSOR_ARCHITECTURE", "").upper() != "ARM64":
-        run(["cmd", "/s", "/c", command])
+
+    batch = smoke_cpp.parent / "angle-smoke.bat"
+    batch_lines = [
+        "@echo on",
+        f'call "{vcvars}" {vc_arch}',
+        "if errorlevel 1 exit /b %errorlevel%",
+        (
+            f'cl /nologo /EHsc /I "{include_dir}" "{smoke_cpp}" '
+            f'/link /LIBPATH:"{lib_dir}" libEGL.lib libGLESv2.lib /OUT:"{exe}"'
+        ),
+        "if errorlevel 1 exit /b %errorlevel%",
+    ]
+
+    if arch == "arm64" and host_arch != "ARM64":
+        batch.write_text("\r\n".join(batch_lines) + "\r\n", encoding="utf-8")
+        run(["cmd", "/d", "/c", str(batch)])
         print("Skipping Windows arm64 smoke execution on non-arm64 runner")
         return
 
-    command = (
-        command + f' && set "PATH={lib_dir};%PATH%" && "{exe}"'
-    )
-    run(["cmd", "/s", "/c", command])
+    batch_lines.extend([
+        f'set "PATH={lib_dir};%PATH%"',
+        f'"{exe}"',
+    ])
+    batch.write_text("\r\n".join(batch_lines) + "\r\n", encoding="utf-8")
+    run(["cmd", "/d", "/c", str(batch)])
 
 
 def find_vcvarsall():
