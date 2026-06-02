@@ -93,6 +93,7 @@ PLATFORM_GN_ARGS = {
 
 
 SMOKE_SOURCE = r"""
+#define EGL_EGLEXT_PROTOTYPES 1
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <EGL/eglext_angle.h>
@@ -108,14 +109,6 @@ static void fail(const char *message)
 
 static EGLDisplay getAnglePlatformDisplay()
 {
-    auto getPlatformDisplay =
-        reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
-            eglGetProcAddress("eglGetPlatformDisplayEXT"));
-    if (getPlatformDisplay == nullptr)
-    {
-        return EGL_NO_DISPLAY;
-    }
-
 #if defined(_WIN32)
     const EGLint displayAttribs[] = {
         EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE,
@@ -136,9 +129,9 @@ static EGLDisplay getAnglePlatformDisplay()
     const EGLint displayAttribs[] = {EGL_NONE};
 #endif
 
-    return getPlatformDisplay(EGL_PLATFORM_ANGLE_ANGLE,
-                              reinterpret_cast<void *>(EGL_DEFAULT_DISPLAY),
-                              displayAttribs);
+    return eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE,
+                                    reinterpret_cast<void *>(EGL_DEFAULT_DISPLAY),
+                                    displayAttribs);
 }
 
 int main()
