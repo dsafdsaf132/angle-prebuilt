@@ -46,10 +46,6 @@ jobs:
             runner: ubuntu-24.04-arm
             platform: linux
             arch: arm64
-          - target: macos-x64
-            runner: macos-15-intel
-            platform: darwin
-            arch: x64
           - target: macos-arm64
             runner: macos-latest
             platform: darwin
@@ -345,62 +341,17 @@ jobs:
           path: ${{ runner.temp }}/artifacts/*
           if-no-files-found: error
 
-  macos-universal:
-    name: macos-universal
-    needs: build
-    runs-on: macos-latest
-    if: >-
-      github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == ''
-    timeout-minutes: 60
-    steps:
-      - name: Check out workflow repository
-        uses: actions/checkout@v4
-        with:
-          path: angle-ci
-
-      - name: Download macOS archives
-        uses: actions/download-artifact@v4
-        with:
-          pattern: angle-darwin-*
-          path: mac-artifacts
-          merge-multiple: true
-
-      - name: Create and verify universal archive
-        shell: bash
-        run: |
-          set -euo pipefail
-          x64_archive="$(find mac-artifacts -maxdepth 1 -name '*-darwin-x64.tar.gz' | head -n 1)"
-          arm64_archive="$(find mac-artifacts -maxdepth 1 -name '*-darwin-arm64.tar.gz' | head -n 1)"
-          mkdir -p "$RUNNER_TEMP/universal"
-          python3 angle-ci/.github/scripts/angle_ci.py universal \
-            --x64-archive "$x64_archive" \
-            --arm64-archive "$arm64_archive" \
-            --artifact-dir "$RUNNER_TEMP/universal"
-          universal_archive="$(find "$RUNNER_TEMP/universal" -maxdepth 1 -name '*-darwin-universal.tar.gz' | head -n 1)"
-          python3 angle-ci/.github/scripts/angle_ci.py verify \
-            --archive "$universal_archive" \
-            --platform darwin \
-            --arch universal
-
-      - name: Upload universal artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: angle-darwin-universal
-          path: ${{ runner.temp }}/universal/*
-          if-no-files-found: error
-
   release:
     name: publish-release
     needs:
       - build
-      - macos-universal
     runs-on: ubuntu-latest
     if: >-
       always() &&
       github.event_name == 'workflow_dispatch' &&
       (
         inputs.artifact_run_id != '' ||
-        (needs.build.result == 'success' && needs.macos-universal.result == 'success')
+        needs.build.result == 'success'
       )
     permissions:
       actions: read

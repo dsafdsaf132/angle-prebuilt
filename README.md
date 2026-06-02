@@ -11,9 +11,7 @@ It syncs, builds, and releases every Sunday at 00:00 UTC.
 | --- | --- |
 | Linux x64 | `angle-{version}-linux-x64.tar.gz` |
 | Linux arm64 | `angle-{version}-linux-arm64.tar.gz` |
-| macOS x64 | `angle-{version}-darwin-x64.tar.gz` |
 | macOS arm64 | `angle-{version}-darwin-arm64.tar.gz` |
-| macOS universal | `angle-{version}-darwin-universal.tar.gz` |
 | Windows x64 | `angle-{version}-win32-x64.zip` |
 | Windows arm64 | `angle-{version}-win32-arm64.zip` |
 

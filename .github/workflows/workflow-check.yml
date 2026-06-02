@@ -27,12 +27,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile .github/scripts/angle_ci.py
           tmp="$(mktemp -d)"
-          for platform in linux darwin win32; do
-            for arch in x64 arm64; do
+          for target in linux:x64 linux:arm64 darwin:arm64 win32:x64 win32:arm64; do
+            platform="${target%%:*}"
+            arch="${target##*:}"
               python3 .github/scripts/angle_ci.py gn-args \
                 --platform "$platform" \
                 --arch "$arch" \
                 --output "$tmp/$platform-$arch.args.gn" \
                 --json-output "$tmp/$platform-$arch.args.json" >/dev/null
-            done
           done
