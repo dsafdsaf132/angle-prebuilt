@@ -634,8 +634,7 @@ def prepend_env_path(current, value):
 
 def run_windows_smoke(smoke_cpp, include_dir, lib_dir, arch):
     vcvars = find_vcvarsall()
-    host_arch = os.environ.get("PROCESSOR_ARCHITECTURE", "").upper()
-    normalized_host_arch = "arm64" if host_arch == "ARM64" else "x64"
+    normalized_host_arch = windows_host_arch()
     if normalized_host_arch != arch:
         raise RuntimeError(
             f"Windows smoke requires a native {arch} runner, got {normalized_host_arch}"
@@ -661,6 +660,16 @@ def run_windows_smoke(smoke_cpp, include_dir, lib_dir, arch):
     ])
     batch.write_text("\r\n".join(batch_lines) + "\r\n", encoding="utf-8")
     run(["cmd", "/d", "/c", str(batch)])
+
+
+def windows_host_arch():
+    for name in ("RUNNER_ARCH", "PROCESSOR_ARCHITEW6432", "PROCESSOR_ARCHITECTURE"):
+        value = os.environ.get(name, "").upper()
+        if value in ("ARM64", "AARCH64"):
+            return "arm64"
+        if value in ("X64", "AMD64", "X86_64"):
+            return "x64"
+    return "unknown"
 
 
 def find_vcvarsall():

@@ -90,7 +90,7 @@ jobs:
               host_raw="$(uname -m)"
               ;;
             Windows)
-              host_raw="${PROCESSOR_ARCHITECTURE:-unknown}"
+              host_raw="${RUNNER_ARCH:-${PROCESSOR_ARCHITEW6432:-${PROCESSOR_ARCHITECTURE:-unknown}}}"
               ;;
             *)
               echo "::error::Unsupported runner OS: ${RUNNER_OS}"
@@ -112,6 +112,9 @@ jobs:
           esac
 
           echo "Runner OS: ${RUNNER_OS}"
+          echo "RUNNER_ARCH: ${RUNNER_ARCH:-}"
+          echo "PROCESSOR_ARCHITECTURE: ${PROCESSOR_ARCHITECTURE:-}"
+          echo "PROCESSOR_ARCHITEW6432: ${PROCESSOR_ARCHITEW6432:-}"
           echo "Runner architecture: ${host_arch} (${host_raw})"
           echo "Target architecture: ${target}"
           if [[ "${host_arch}" != "${target}" ]]; then
