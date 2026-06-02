@@ -130,6 +130,7 @@ jobs:
             libdrm-dev \
             libglib2.0-dev \
             libgl1-mesa-dev \
+            libpci-dev \
             libx11-dev \
             libxcomposite-dev \
             libxcursor-dev \
