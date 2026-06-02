@@ -257,6 +257,43 @@ jobs:
           gclient sync --no-history --shallow --delete_unversioned_trees --reset --jobs "$sync_jobs"
           gclient runhooks
 
+      - name: Patch Windows ARM64 toolchain debugger copy
+        if: matrix.platform == 'win32' && matrix.arch == 'arm64'
+        shell: bash
+        working-directory: angle
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("build/vs_toolchain.py")
+          text = path.read_text(encoding="utf-8")
+          old = """    target_dir = os.path.join(target_dir, 'win_clang_x64')
+              target_cpu = 'x64'
+              runtime_dir = x64_runtime
+              os.makedirs(target_dir, exist_ok=True)
+              _CopyRuntime(target_dir, runtime_dir, target_cpu, debug=False)
+              if configuration == 'Debug':
+                _CopyRuntime(target_dir, runtime_dir, target_cpu, debug=True)
+              _CopyDebugger(target_dir, target_cpu)
+          """
+          new = """    target_dir = os.path.join(target_dir, 'win_clang_x64')
+              target_cpu = 'x64'
+              runtime_dir = x64_runtime
+              os.makedirs(target_dir, exist_ok=True)
+              _CopyRuntime(target_dir, runtime_dir, target_cpu, debug=False)
+              if configuration == 'Debug':
+                _CopyRuntime(target_dir, runtime_dir, target_cpu, debug=True)
+              try:
+                _CopyDebugger(target_dir, target_cpu)
+              except Exception as e:
+                print('Skipping win_clang_x64 debugger DLL copy: %s' % e)
+          """
+          if old not in text:
+            raise SystemExit("Could not locate win_clang_x64 debugger copy block")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
       - name: Generate GN args
         shell: bash
         working-directory: angle
