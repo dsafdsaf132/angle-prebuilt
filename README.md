@@ -1,9 +1,9 @@
 # ANGLE Prebuilt
 
-This repository is a fork of Google ANGLE focused on producing cross-platform
-prebuilt shared-library archives for native EGL/OpenGL ES/WebGL-style consumers.
-It syncs upstream ANGLE, builds, and publishes releases every Sunday at 00:00
-UTC.
+This repository tracks upstream ANGLE and publishes ready-to-use archives for
+native EGL/OpenGL ES consumers.
+
+It syncs, builds, and releases every Sunday at 00:00 UTC.
 
 ## Targets
 
