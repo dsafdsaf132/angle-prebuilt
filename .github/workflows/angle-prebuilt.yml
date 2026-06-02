@@ -57,7 +57,7 @@ jobs:
             platform: win32
             arch: x64
           - target: windows-arm64
-            runner: windows-2022
+            runner: windows-11-arm
             platform: win32
             arch: arm64
 
