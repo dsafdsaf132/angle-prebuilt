@@ -222,7 +222,10 @@ def write_gn_args(args):
     gn_args = dict(COMMON_GN_ARGS)
     gn_args.update(PLATFORM_GN_ARGS[args.platform])
     if args.platform == "linux" and args.arch == "arm64":
-        gn_args["is_clang"] = False
+        gn_args["clang_base_path"] = "/usr/lib/llvm-20"
+        gn_args["clang_version"] = "20"
+        gn_args["is_clang"] = True
+        gn_args["target_cpu"] = args.arch
         gn_args["use_sysroot"] = False
     else:
         gn_args["target_cpu"] = args.arch
