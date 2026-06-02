@@ -621,7 +621,7 @@ def compile_and_run_smoke(extract_root, target_platform, arch):
             run([str(exe)], env=env)
     else:
         env["DYLD_LIBRARY_PATH"] = prepend_env_path(env.get("DYLD_LIBRARY_PATH"), str(lib_dir))
-        if target_platform == "darwin" and arch == "x64":
+        if target_platform == "darwin" and arch in ("x64", "universal"):
             env["ANGLE_SMOKE_ALLOW_NO_DISPLAY"] = "1"
         run([str(exe)], env=env)
 
