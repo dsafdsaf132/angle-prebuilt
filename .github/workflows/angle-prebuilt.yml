@@ -144,14 +144,20 @@ jobs:
             pkg-config \
             xvfb
           if [[ "${{ matrix.platform }}" == "linux" && "${{ matrix.arch }}" == "arm64" ]]; then
+            sudo install -d -m 0755 /etc/apt/keyrings
+            curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | \
+              sudo tee /etc/apt/keyrings/apt.llvm.org.asc >/dev/null
+            echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble main" | \
+              sudo tee /etc/apt/sources.list.d/llvm-toolchain-noble.list
+            sudo apt-get update
             sudo apt-get install -y --no-install-recommends \
-              clang-20 \
-              libclang-rt-20-dev \
-              lld-20 \
-              llvm-20
-            /usr/lib/llvm-20/bin/clang++ --version
-            /usr/lib/llvm-20/bin/llvm-ar --version
-            runtime_dir="/usr/lib/llvm-20/lib/clang/20/lib"
+              clang-23 \
+              libclang-rt-23-dev \
+              lld-23 \
+              llvm-23
+            /usr/lib/llvm-23/bin/clang++ --version
+            /usr/lib/llvm-23/bin/llvm-ar --version
+            runtime_dir="/usr/lib/llvm-23/lib/clang/23/lib"
             expected_builtins="$runtime_dir/aarch64-unknown-linux-gnu/libclang_rt.builtins.a"
             actual_builtins="$(
               find "$runtime_dir" -maxdepth 3 -type f \
