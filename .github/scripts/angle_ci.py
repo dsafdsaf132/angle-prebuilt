@@ -145,6 +145,11 @@ int main()
         display = getAnglePlatformDisplay();
         if (display == EGL_NO_DISPLAY)
         {
+            if (std::getenv("ANGLE_SMOKE_ALLOW_NO_DISPLAY") != nullptr)
+            {
+                std::fprintf(stderr, "Skipping runtime smoke: no EGL display is available\n");
+                return 0;
+            }
             fail("eglGetDisplay/eglGetPlatformDisplayEXT failed");
         }
         if (!eglInitialize(display, &major, &minor))
@@ -616,6 +621,8 @@ def compile_and_run_smoke(extract_root, target_platform, arch):
             run([str(exe)], env=env)
     else:
         env["DYLD_LIBRARY_PATH"] = prepend_env_path(env.get("DYLD_LIBRARY_PATH"), str(lib_dir))
+        if target_platform == "darwin" and arch == "x64":
+            env["ANGLE_SMOKE_ALLOW_NO_DISPLAY"] = "1"
         run([str(exe)], env=env)
 
 
