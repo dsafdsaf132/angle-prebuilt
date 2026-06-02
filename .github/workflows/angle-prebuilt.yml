@@ -226,6 +226,16 @@ jobs:
           echo "GN args:"
           cat "$RUNNER_TEMP/gn-args.json"
           gn gen out/Release
+          if [[ "${{ matrix.platform }}" == "linux" && "${{ matrix.arch }}" == "arm64" ]]; then
+            for tool in ar nm ranlib readelf strip objcopy objdump ld gcc g++ cc c++; do
+              prefixed="aarch64-linux-gnu-$tool"
+              tool_path="$(command -v "$prefixed" || command -v "$tool" || true)"
+              if [[ -n "$tool_path" ]]; then
+                ln -sf "$tool_path" "out/Release/$prefixed"
+              fi
+            done
+            ls -l out/Release/aarch64-linux-gnu-*
+          fi
           if [[ "${{ matrix.platform }}" == "win32" ]]; then
             autoninja -C out/Release libEGL libGLESv2 copy_compiler_dll
           else
