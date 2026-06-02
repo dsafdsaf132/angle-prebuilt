@@ -1,0 +1,344 @@
+name: ANGLE Prebuilt
+
+on:
+  workflow_dispatch:
+    inputs:
+      angle_ref:
+        description: ANGLE branch, tag, or ref to build.
+        required: true
+        default: chromium/7151
+      angle_commit:
+        description: Optional ANGLE commit SHA. Empty builds angle_ref HEAD.
+        required: false
+        default: ""
+      release_tag:
+        description: Optional GitHub Release tag. Empty means build only.
+        required: false
+        default: ""
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: angle-prebuilt-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+          - target: macos-x64
+            runner: macos-13
+            platform: darwin
+            arch: x64
+          - target: macos-arm64
+            runner: macos-14
+            platform: darwin
+            arch: arm64
+          - target: windows-x64
+            runner: windows-2022
+            platform: win32
+            arch: x64
+          - target: windows-arm64
+            runner: windows-11-arm
+            platform: win32
+            arch: arm64
+
+    env:
+      DEPOT_TOOLS_WIN_TOOLCHAIN: "0"
+      GYP_MSVS_VERSION: "2022"
+
+    steps:
+      - name: Check out workflow repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: angle
+
+      - name: Preserve CI scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/angle-ci-scripts"
+          cp -R "$GITHUB_WORKSPACE/angle/.github/scripts/." "$RUNNER_TEMP/angle-ci-scripts/"
+          echo "ANGLE_CI_SCRIPTS=$RUNNER_TEMP/angle-ci-scripts" >> "$GITHUB_ENV"
+
+      - name: Resolve ANGLE source
+        shell: bash
+        working-directory: angle
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ref="${{ inputs.angle_ref }}"
+            requested_commit="${{ inputs.angle_commit }}"
+            git remote add chromium https://chromium.googlesource.com/angle/angle.git 2>/dev/null || \
+              git remote set-url chromium https://chromium.googlesource.com/angle/angle.git
+
+            head_ref="${ref#refs/heads/}"
+            tag_ref="${ref#refs/tags/}"
+            if git ls-remote --exit-code --heads chromium "$head_ref" >/dev/null 2>&1; then
+              git fetch --depth 1 chromium "refs/heads/$head_ref"
+            elif git ls-remote --exit-code --tags chromium "$tag_ref" >/dev/null 2>&1; then
+              git fetch --depth 1 chromium "refs/tags/$tag_ref"
+            else
+              git fetch --depth 1 chromium "$ref"
+            fi
+
+            if [[ -n "$requested_commit" ]]; then
+              git fetch --depth 1 chromium "$requested_commit" || true
+              git checkout --detach "$requested_commit"
+            else
+              git checkout --detach FETCH_HEAD
+            fi
+            effective_ref="$ref"
+          else
+            effective_ref="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
+          fi
+
+          resolved_commit="$(git rev-parse HEAD)"
+          echo "ANGLE_REF_EFFECTIVE=$effective_ref" >> "$GITHUB_ENV"
+          echo "ANGLE_COMMIT_RESOLVED=$resolved_commit" >> "$GITHUB_ENV"
+          echo "ANGLE ref: $effective_ref"
+          echo "ANGLE commit: $resolved_commit"
+
+      - name: Install Linux packages
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ \
+            libasound2-dev \
+            libdrm-dev \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxcomposite-dev \
+            libxcursor-dev \
+            libxdamage-dev \
+            libxext-dev \
+            libxfixes-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libxrender-dev \
+            libxtst-dev \
+            mesa-common-dev \
+            pkg-config \
+            xvfb
+
+      - name: Install depot_tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$RUNNER_TEMP/depot_tools"
+          echo "$RUNNER_TEMP/depot_tools" >> "$GITHUB_PATH"
+
+      - name: Configure gclient
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$GITHUB_WORKSPACE/.gclient" <<'PY'
+          solutions = [
+            {
+              "name": "angle",
+              "url": "https://chromium.googlesource.com/angle/angle.git",
+              "deps_file": "DEPS",
+              "managed": False,
+              "custom_vars": {
+                "checkout_angle_cl_deps": False,
+                "checkout_angle_dawn_deps": False,
+                "checkout_angle_internal": False,
+                "checkout_angle_restricted_traces": False,
+              },
+            },
+          ]
+          PY
+
+      - name: Sync ANGLE dependencies
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          gclient sync --no-history --shallow --delete_unversioned_trees --reset --jobs 8
+          gclient runhooks
+
+      - name: Generate GN args
+        shell: bash
+        working-directory: angle
+        run: |
+          set -euo pipefail
+          python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" gn-args \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --output out/Release/args.gn \
+            --json-output "$RUNNER_TEMP/gn-args.json"
+
+      - name: Build ANGLE shared libraries
+        shell: bash
+        working-directory: angle
+        run: |
+          set -euo pipefail
+          echo "ANGLE commit: $ANGLE_COMMIT_RESOLVED"
+          echo "GN args:"
+          cat "$RUNNER_TEMP/gn-args.json"
+          gn gen out/Release
+          if [[ "${{ matrix.platform }}" == "win32" ]]; then
+            autoninja -C out/Release libEGL libGLESv2 copy_compiler_dll
+          else
+            autoninja -C out/Release libEGL libGLESv2
+          fi
+          echo "Build output file list:"
+          python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" list-outputs --build-dir out/Release
+
+      - name: Package archive
+        shell: bash
+        working-directory: angle
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/artifacts"
+          python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" package \
+            --source-root "$PWD" \
+            --build-dir out/Release \
+            --artifact-dir "$RUNNER_TEMP/artifacts" \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --angle-ref "$ANGLE_REF_EFFECTIVE" \
+            --angle-commit "$ANGLE_COMMIT_RESOLVED" \
+            --gn-args-json "$RUNNER_TEMP/gn-args.json"
+          ls -la "$RUNNER_TEMP/artifacts"
+
+      - name: Verify archive
+        shell: bash
+        working-directory: angle
+        run: |
+          set -euo pipefail
+          archive="$(find "$RUNNER_TEMP/artifacts" -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) | head -n 1)"
+          python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" verify \
+            --archive "$archive" \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --source-root "$PWD"
+
+      - name: Upload archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: angle-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/artifacts/*
+          if-no-files-found: error
+
+  macos-universal:
+    name: macos-universal
+    needs: build
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Check out workflow repository
+        uses: actions/checkout@v4
+        with:
+          path: angle-ci
+
+      - name: Download macOS archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: angle-darwin-*
+          path: mac-artifacts
+          merge-multiple: true
+
+      - name: Create and verify universal archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          x64_archive="$(find mac-artifacts -maxdepth 1 -name '*-darwin-x64.tar.gz' | head -n 1)"
+          arm64_archive="$(find mac-artifacts -maxdepth 1 -name '*-darwin-arm64.tar.gz' | head -n 1)"
+          mkdir -p "$RUNNER_TEMP/universal"
+          python3 angle-ci/.github/scripts/angle_ci.py universal \
+            --x64-archive "$x64_archive" \
+            --arm64-archive "$arm64_archive" \
+            --artifact-dir "$RUNNER_TEMP/universal"
+          universal_archive="$(find "$RUNNER_TEMP/universal" -maxdepth 1 -name '*-darwin-universal.tar.gz' | head -n 1)"
+          python3 angle-ci/.github/scripts/angle_ci.py verify \
+            --archive "$universal_archive" \
+            --platform darwin \
+            --arch universal
+
+      - name: Upload universal artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: angle-darwin-universal
+          path: ${{ runner.temp }}/universal/*
+          if-no-files-found: error
+
+  release:
+    name: publish-release
+    needs:
+      - build
+      - macos-universal
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: repo
+
+      - name: Download archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: angle-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 repo/.github/scripts/angle_ci.py release-notes \
+            --artifact-root release-assets \
+            --output release-notes.md
+          cat release-notes.md
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.release_tag }}"
+          cd repo
+          git fetch --force origin "+refs/tags/$tag:refs/tags/$tag" || true
+          if git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null; then
+            tag_commit="$(git rev-parse "refs/tags/$tag^{commit}")"
+            if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+              echo "::error::Tag $tag points to $tag_commit, not workflow commit $GITHUB_SHA"
+              exit 1
+            fi
+          fi
+          cd ..
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" release-assets/* --clobber
+          else
+            gh release create "$tag" release-assets/* \
+              --target "$GITHUB_SHA" \
+              --title "$tag" \
+              --notes-file release-notes.md
+          fi
