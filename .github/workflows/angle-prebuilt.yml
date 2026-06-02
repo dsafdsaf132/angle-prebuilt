@@ -304,7 +304,6 @@ jobs:
           echo "GN args:"
           cat "$RUNNER_TEMP/gn-args.json"
           gn gen out/Release
-          build_jobs=()
           if [[ "${{ matrix.platform }}" == "win32" && "${{ matrix.arch }}" == "arm64" ]]; then
             processor_count="${NUMBER_OF_PROCESSORS:-}"
             if [[ ! "$processor_count" =~ ^[0-9]+$ || "$processor_count" -lt 1 ]]; then
@@ -314,13 +313,12 @@ jobs:
             if [[ "$jobs" -gt 12 ]]; then
               jobs=12
             fi
-            build_jobs=(-j "$jobs")
             echo "Windows ARM64 ninja jobs: $jobs (processors: $processor_count)"
-          fi
-          if [[ "${{ matrix.platform }}" == "win32" ]]; then
-            autoninja -C out/Release "${build_jobs[@]}" libEGL libGLESv2 copy_compiler_dll
+            autoninja -C out/Release -j "$jobs" libEGL libGLESv2 copy_compiler_dll
+          elif [[ "${{ matrix.platform }}" == "win32" ]]; then
+            autoninja -C out/Release libEGL libGLESv2 copy_compiler_dll
           else
-            autoninja -C out/Release "${build_jobs[@]}" libEGL libGLESv2
+            autoninja -C out/Release libEGL libGLESv2
           fi
           echo "Build output file list:"
           python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" list-outputs --build-dir out/Release
