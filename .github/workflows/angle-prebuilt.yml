@@ -15,6 +15,10 @@ on:
         description: Optional GitHub Release tag override. Empty uses angle-{commitPosition}.
         required: false
         default: ""
+      artifact_run_id:
+        description: Optional workflow run ID whose angle-* artifacts should be reused for release.
+        required: false
+        default: ""
   schedule:
     - cron: "0 0 * * 0"
   push:
@@ -57,7 +61,9 @@ jobs:
   build:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == '')
     timeout-minutes: 360
     strategy:
       fail-fast: false
@@ -406,7 +412,9 @@ jobs:
     name: macos-universal
     needs: build
     runs-on: macos-latest
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == '')
     timeout-minutes: 60
     steps:
       - name: Check out workflow repository
@@ -452,9 +460,17 @@ jobs:
       - macos-universal
     runs-on: ubuntu-latest
     if: >-
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch'
+      always() &&
+      (
+        (github.event_name == 'workflow_dispatch' && inputs.artifact_run_id != '') ||
+        (
+          (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+          needs.build.result == 'success' &&
+          needs.macos-universal.result == 'success'
+        )
+      )
     permissions:
+      actions: read
       contents: write
     steps:
       - name: Check out release repository
@@ -463,12 +479,22 @@ jobs:
           fetch-depth: 0
           path: repo
 
+      - name: Show artifact source
+        shell: bash
+        env:
+          ARTIFACT_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.artifact_run_id != '' && inputs.artifact_run_id || github.run_id }}
+        run: |
+          set -euo pipefail
+          echo "Artifact run ID: $ARTIFACT_RUN_ID"
+
       - name: Download archives
         uses: actions/download-artifact@v4
         with:
           pattern: angle-*
           path: release-assets
           merge-multiple: true
+          run-id: ${{ github.event_name == 'workflow_dispatch' && inputs.artifact_run_id != '' && inputs.artifact_run_id || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Resolve release tag
         shell: bash

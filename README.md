@@ -48,10 +48,14 @@ Inputs:
 | `angle_ref` | `main` | ANGLE branch, tag, or ref to build |
 | `angle_commit` | empty | Optional exact ANGLE commit |
 | `release_tag` | empty | Optional GitHub Release tag override |
+| `artifact_run_id` | empty | Optional workflow run ID to reuse existing artifacts |
 
 Push and pull request runs do lightweight CI helper validation only. Manual and
 scheduled runs build, verify, and publish release assets by default using the
 ANGLE commit position.
+
+Set `artifact_run_id` in a manual run to skip rebuilding and publish from a
+previous run's `angle-*` artifacts.
 
 The scheduled run builds upstream ANGLE `main` every Sunday at 00:00 UTC and
 publishes `angle-main-{commitPosition}`.
