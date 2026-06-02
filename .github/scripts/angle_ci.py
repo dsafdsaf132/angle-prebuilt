@@ -62,7 +62,7 @@ PLATFORM_GN_ARGS = {
         "ozone_platform_drm": False,
         "ozone_platform_headless": False,
         "ozone_platform_wayland": False,
-        "ozone_platform_x11": True,
+        "ozone_platform_x11": False,
         "use_ozone": False,
     },
     "darwin": {
@@ -591,8 +591,15 @@ def run_windows_smoke(smoke_cpp, include_dir, lib_dir, arch):
     command = (
         f'call "{vcvars}" {vc_arch} && '
         f'cl /nologo /EHsc /I "{include_dir}" "{smoke_cpp}" '
-        f'/link /LIBPATH:"{lib_dir}" libEGL.lib libGLESv2.lib /OUT:"{exe}" && '
-        f'set "PATH={lib_dir};%PATH%" && "{exe}"'
+        f'/link /LIBPATH:"{lib_dir}" libEGL.lib libGLESv2.lib /OUT:"{exe}"'
+    )
+    if arch == "arm64" and os.environ.get("PROCESSOR_ARCHITECTURE", "").upper() != "ARM64":
+        run(["cmd", "/s", "/c", command])
+        print("Skipping Windows arm64 smoke execution on non-arm64 runner")
+        return
+
+    command = (
+        command + f' && set "PATH={lib_dir};%PATH%" && "{exe}"'
     )
     run(["cmd", "/s", "/c", command])
 
