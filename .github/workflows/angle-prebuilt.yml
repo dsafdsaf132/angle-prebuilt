@@ -248,7 +248,13 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          gclient sync --no-history --shallow --delete_unversioned_trees --reset --jobs 8
+          sync_jobs=8
+          if [[ "${{ matrix.platform }}" == "win32" && "${{ matrix.arch }}" == "arm64" ]]; then
+            sync_jobs=1
+            vpython3 "$RUNNER_TEMP/depot_tools/gsutil.py" version || \
+              echo "gsutil prewarm returned non-zero; continuing with serialized gclient sync"
+          fi
+          gclient sync --no-history --shallow --delete_unversioned_trees --reset --jobs "$sync_jobs"
           gclient runhooks
 
       - name: Generate GN args
