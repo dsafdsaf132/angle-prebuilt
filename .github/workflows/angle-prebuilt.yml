@@ -179,6 +179,14 @@ jobs:
           gclient sync --no-history --shallow --delete_unversioned_trees --reset --jobs 8
           gclient runhooks
 
+      - name: Install Linux arm64 sysroot
+        if: matrix.platform == 'linux' && matrix.arch == 'arm64'
+        shell: bash
+        working-directory: angle
+        run: |
+          set -euo pipefail
+          python3 build/linux/sysroot_scripts/install-sysroot.py --arch=arm64
+
       - name: Generate GN args
         shell: bash
         working-directory: angle
