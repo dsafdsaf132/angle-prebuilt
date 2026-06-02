@@ -44,6 +44,10 @@ jobs:
 
           git remote add upstream https://chromium.googlesource.com/angle/angle.git 2>/dev/null || \
             git remote set-url upstream https://chromium.googlesource.com/angle/angle.git
+          mkdir -p .git/info
+          printf ".github/workflows/** merge=ours\n" >> .git/info/attributes
+          git config merge.ours.driver true
+
           git fetch origin "$TARGET_BRANCH"
           git fetch upstream "$UPSTREAM_REF"
 
@@ -59,11 +63,16 @@ jobs:
             exit 0
           fi
 
-          if ! git merge --no-edit -m "chore(sync): merge upstream ANGLE $UPSTREAM_REF" "$upstream_commit"; then
+          if ! git merge --no-ff --no-commit "$upstream_commit"; then
             echo "::error::Upstream sync produced merge conflicts. Resolve locally, push, then rerun this workflow."
             git status --short
             exit 1
           fi
+
+          git rm -r --ignore-unmatch .github/workflows
+          git checkout "$current_commit" -- .github/workflows
+          git add .github/workflows
+          git commit -m "chore(sync): merge upstream ANGLE $UPSTREAM_REF"
 
           new_commit="$(git rev-parse HEAD)"
           echo "New fork commit: $new_commit"
