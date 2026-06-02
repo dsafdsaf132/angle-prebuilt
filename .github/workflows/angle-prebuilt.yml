@@ -143,6 +143,32 @@ jobs:
             mesa-common-dev \
             pkg-config \
             xvfb
+          if [[ "${{ matrix.platform }}" == "linux" && "${{ matrix.arch }}" == "arm64" ]]; then
+            for pair in \
+              "ar:ar" \
+              "nm:nm" \
+              "ranlib:ranlib" \
+              "readelf:readelf" \
+              "strip:strip" \
+              "objcopy:objcopy" \
+              "objdump:objdump" \
+              "ld:ld" \
+              "gcc:gcc" \
+              "g++:g++" \
+              "cc:cc" \
+              "c++:c++"; do
+              prefixed="aarch64-linux-gnu-${pair%%:*}"
+              native="${pair#*:}"
+              if ! command -v "$prefixed" >/dev/null 2>&1; then
+                native_path="$(command -v "$native" || true)"
+                if [[ -n "$native_path" ]]; then
+                  sudo ln -sf "$native_path" "/usr/local/bin/$prefixed"
+                fi
+              fi
+            done
+            command -v aarch64-linux-gnu-ar
+            command -v aarch64-linux-gnu-g++
+          fi
 
       - name: Install depot_tools
         shell: bash
