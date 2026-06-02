@@ -52,6 +52,9 @@ Inputs:
 Push and pull request runs build and verify only. A manual run publishes release
 assets only when `release_tag` is set.
 
+The scheduled run builds upstream ANGLE `main` every Sunday at 00:00 UTC and
+publishes `angle-main-{commitPosition}`.
+
 ## License
 
 ANGLE is distributed under the BSD-style license in `LICENSE`.

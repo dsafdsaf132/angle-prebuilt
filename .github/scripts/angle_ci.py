@@ -283,6 +283,7 @@ def write_gn_args(args):
 
 
 def parse_angle_version(source_root, angle_ref):
+    normalized_ref = (angle_ref or "").removeprefix("refs/heads/")
     match = re.search(r"(?:^|/)(\d{4,})(?:$|[-_/])", angle_ref or "")
     if match:
         return match.group(1)
@@ -294,14 +295,19 @@ def parse_angle_version(source_root, angle_ref):
                 [sys.executable, str(commit_id), "position"], cwd=source_root, text=True
             ).strip()
             if version and version != "0":
+                if normalized_ref == "main":
+                    return f"main-{version}"
                 return version
         except subprocess.SubprocessError:
             pass
 
     try:
-        return subprocess.check_output(
+        short_commit = subprocess.check_output(
             ["git", "rev-parse", "--short=12", "HEAD"], cwd=source_root, text=True
         ).strip()
+        if normalized_ref == "main":
+            return f"main-{short_commit}"
+        return short_commit
     except subprocess.SubprocessError:
         return "unknown"
 
