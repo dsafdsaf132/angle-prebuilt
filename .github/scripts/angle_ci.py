@@ -635,9 +635,12 @@ def prepend_env_path(current, value):
 def run_windows_smoke(smoke_cpp, include_dir, lib_dir, arch):
     vcvars = find_vcvarsall()
     host_arch = os.environ.get("PROCESSOR_ARCHITECTURE", "").upper()
-    vc_arch = "x64"
-    if arch == "arm64":
-        vc_arch = "arm64" if host_arch == "ARM64" else "x64_arm64"
+    normalized_host_arch = "arm64" if host_arch == "ARM64" else "x64"
+    if normalized_host_arch != arch:
+        raise RuntimeError(
+            f"Windows smoke requires a native {arch} runner, got {normalized_host_arch}"
+        )
+    vc_arch = arch
     exe = smoke_cpp.parent / "angle-smoke.exe"
 
     batch = smoke_cpp.parent / "angle-smoke.bat"
@@ -651,12 +654,6 @@ def run_windows_smoke(smoke_cpp, include_dir, lib_dir, arch):
         ),
         "if errorlevel 1 exit /b %errorlevel%",
     ]
-
-    if arch == "arm64" and host_arch != "ARM64":
-        batch.write_text("\r\n".join(batch_lines) + "\r\n", encoding="utf-8")
-        run(["cmd", "/d", "/c", str(batch)])
-        print("Skipping Windows arm64 smoke execution on non-arm64 runner")
-        return
 
     batch_lines.extend([
         f'set "PATH={lib_dir};%PATH%"',
