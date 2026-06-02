@@ -231,14 +231,21 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            git config --global core.autocrlf false
+            git config --global core.filemode false
+            git config --global core.fscache true
+            git config --global core.preloadindex true
+            git config --global depot-tools.allowGlobalGitConfig false
+          fi
           sync_jobs=8
           if [[ "${{ matrix.platform }}" == "win32" && "${{ matrix.arch }}" == "arm64" ]]; then
-            sync_jobs=1
+            sync_jobs=4
             vpython3 "$RUNNER_TEMP/depot_tools/gsutil.py" version || \
-              echo "gsutil prewarm returned non-zero; continuing with serialized gclient sync"
+              echo "gsutil prewarm returned non-zero; continuing with gclient sync"
           fi
+          echo "gclient sync jobs: $sync_jobs"
           gclient sync --no-history --shallow --delete_unversioned_trees --reset --jobs "$sync_jobs"
-          gclient runhooks
 
       - name: Patch Windows ARM64 toolchain debugger copy
         if: matrix.platform == 'win32' && matrix.arch == 'arm64'
@@ -297,10 +304,23 @@ jobs:
           echo "GN args:"
           cat "$RUNNER_TEMP/gn-args.json"
           gn gen out/Release
+          build_jobs=()
+          if [[ "${{ matrix.platform }}" == "win32" && "${{ matrix.arch }}" == "arm64" ]]; then
+            processor_count="${NUMBER_OF_PROCESSORS:-}"
+            if [[ ! "$processor_count" =~ ^[0-9]+$ || "$processor_count" -lt 1 ]]; then
+              processor_count="$(python3 -c "import os; print(os.cpu_count() or 4)")"
+            fi
+            jobs=$((processor_count * 2))
+            if [[ "$jobs" -gt 12 ]]; then
+              jobs=12
+            fi
+            build_jobs=(-j "$jobs")
+            echo "Windows ARM64 ninja jobs: $jobs (processors: $processor_count)"
+          fi
           if [[ "${{ matrix.platform }}" == "win32" ]]; then
-            autoninja -C out/Release libEGL libGLESv2 copy_compiler_dll
+            autoninja -C out/Release "${build_jobs[@]}" libEGL libGLESv2 copy_compiler_dll
           else
-            autoninja -C out/Release libEGL libGLESv2
+            autoninja -C out/Release "${build_jobs[@]}" libEGL libGLESv2
           fi
           echo "Build output file list:"
           python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" list-outputs --build-dir out/Release
