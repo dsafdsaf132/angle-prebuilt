@@ -134,19 +134,26 @@ jobs:
             requested_commit="${{ inputs.angle_commit }}"
             git remote add chromium https://chromium.googlesource.com/angle/angle.git 2>/dev/null || \
               git remote set-url chromium https://chromium.googlesource.com/angle/angle.git
+            fetch_angle_ref() {
+              local refspec="$1"
+              git fetch chromium "$refspec"
+              if [[ "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
+                git fetch --unshallow chromium "$refspec"
+              fi
+            }
 
             head_ref="${ref#refs/heads/}"
             tag_ref="${ref#refs/tags/}"
             if git ls-remote --exit-code --heads chromium "$head_ref" >/dev/null 2>&1; then
-              git fetch --depth 1 chromium "refs/heads/$head_ref"
+              fetch_angle_ref "refs/heads/$head_ref"
             elif git ls-remote --exit-code --tags chromium "$tag_ref" >/dev/null 2>&1; then
-              git fetch --depth 1 chromium "refs/tags/$tag_ref"
+              fetch_angle_ref "refs/tags/$tag_ref"
             else
-              git fetch --depth 1 chromium "$ref"
+              fetch_angle_ref "$ref"
             fi
 
             if [[ -n "$requested_commit" ]]; then
-              git fetch --depth 1 chromium "$requested_commit" || true
+              fetch_angle_ref "$requested_commit" || true
               git checkout --detach "$requested_commit"
             else
               git checkout --detach FETCH_HEAD
@@ -156,7 +163,10 @@ jobs:
             ref="main"
             git remote add chromium https://chromium.googlesource.com/angle/angle.git 2>/dev/null || \
               git remote set-url chromium https://chromium.googlesource.com/angle/angle.git
-            git fetch --depth 1 chromium "refs/heads/$ref"
+            git fetch chromium "refs/heads/$ref"
+            if [[ "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
+              git fetch --unshallow chromium "refs/heads/$ref"
+            fi
             git checkout --detach FETCH_HEAD
             effective_ref="$ref"
           else
@@ -498,10 +508,11 @@ jobs:
             fi
           fi
           cd ..
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" release-assets/* --clobber
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
           else
             gh release create "$tag" release-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "$tag" \
               --notes-file release-notes.md
