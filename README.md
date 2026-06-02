@@ -37,30 +37,6 @@ angle/
 `angle-build.json` records the ANGLE ref, resolved commit, platform, arch,
 Release/shared-library settings, generation time, and GN args.
 
-## Build And Release
-
-Use the **ANGLE Prebuilt** GitHub Actions workflow.
-
-Inputs:
-
-| Input | Default | Description |
-| --- | --- | --- |
-| `angle_ref` | `main` | Fork branch, tag, or ref to build |
-| `angle_commit` | empty | Optional exact fork commit |
-| `release_tag` | empty | Optional GitHub Release tag override |
-| `artifact_run_id` | empty | Optional workflow run ID to reuse existing artifacts |
-
-Push and pull request runs use the separate **Workflow Check** workflow for
-lightweight CI helper validation only. Manual **ANGLE Prebuilt** runs build,
-verify, and publish release assets by default using the ANGLE commit position.
-
-Set `artifact_run_id` in a manual run to skip rebuilding and publish from a
-previous run's `angle-*` artifacts.
-
-The **Sync Fork** workflow updates the fork from upstream ANGLE `main` every
-Saturday at 23:00 UTC while preserving this repository's workflow files, then
-triggers **ANGLE Prebuilt** on the synced fork.
-
 ## License
 
 ANGLE is distributed under the BSD-style license in `LICENSE`.
