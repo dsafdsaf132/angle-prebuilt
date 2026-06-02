@@ -221,10 +221,11 @@ def format_gn_value(value):
 def write_gn_args(args):
     gn_args = dict(COMMON_GN_ARGS)
     gn_args.update(PLATFORM_GN_ARGS[args.platform])
-    gn_args["target_cpu"] = args.arch
     if args.platform == "linux" and args.arch == "arm64":
         gn_args["is_clang"] = False
         gn_args["use_sysroot"] = False
+    else:
+        gn_args["target_cpu"] = args.arch
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
