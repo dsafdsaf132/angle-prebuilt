@@ -49,8 +49,9 @@ Inputs:
 | `angle_commit` | empty | Optional exact ANGLE commit |
 | `release_tag` | empty | Optional GitHub Release tag override |
 
-Push and pull request runs build and verify only. Manual and scheduled runs
-publish release assets by default using the ANGLE commit position.
+Push and pull request runs do lightweight CI helper validation only. Manual and
+scheduled runs build, verify, and publish release assets by default using the
+ANGLE commit position.
 
 The scheduled run builds upstream ANGLE `main` every Sunday at 00:00 UTC and
 publishes `angle-main-{commitPosition}`.
