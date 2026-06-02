@@ -2,6 +2,8 @@
 
 This repository is a fork of Google ANGLE focused on producing cross-platform
 prebuilt shared-library archives for native EGL/OpenGL ES/WebGL-style consumers.
+It syncs upstream ANGLE, builds, and publishes releases every Sunday at 00:00
+UTC.
 
 ## Targets
 
@@ -45,23 +47,21 @@ Inputs:
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `angle_ref` | `main` | ANGLE branch, tag, or ref to build |
-| `angle_commit` | empty | Optional exact ANGLE commit |
+| `angle_ref` | `main` | Fork branch, tag, or ref to build |
+| `angle_commit` | empty | Optional exact fork commit |
 | `release_tag` | empty | Optional GitHub Release tag override |
 | `artifact_run_id` | empty | Optional workflow run ID to reuse existing artifacts |
 
-Push and pull request runs do lightweight CI helper validation only. Manual and
-scheduled runs build, verify, and publish release assets by default using the
-ANGLE commit position.
+Push and pull request runs use the separate **Workflow Check** workflow for
+lightweight CI helper validation only. Manual **ANGLE Prebuilt** runs build,
+verify, and publish release assets by default using the ANGLE commit position.
 
 Set `artifact_run_id` in a manual run to skip rebuilding and publish from a
 previous run's `angle-*` artifacts.
 
-The scheduled run builds upstream ANGLE `main` every Sunday at 00:00 UTC and
-publishes `angle-main-{commitPosition}`.
-
 The **Sync Fork** workflow updates the fork from upstream ANGLE `main` every
-Saturday at 23:00 UTC while preserving this repository's workflow files.
+Saturday at 23:00 UTC while preserving this repository's workflow files, then
+triggers **ANGLE Prebuilt** on the synced fork.
 
 ## License
 

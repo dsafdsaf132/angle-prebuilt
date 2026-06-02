@@ -15,6 +15,7 @@ on:
     - cron: "0 23 * * 6"
 
 permissions:
+  actions: write
   contents: write
 
 concurrency:
@@ -52,11 +53,13 @@ jobs:
           git fetch upstream "$UPSTREAM_REF"
 
           upstream_commit="$(git rev-parse FETCH_HEAD)"
+          upstream_position="$(git rev-list "$upstream_commit" --count)"
           current_commit="$(git rev-parse HEAD)"
           echo "Target branch: $TARGET_BRANCH"
           echo "Current fork commit: $current_commit"
           echo "Upstream ref: $UPSTREAM_REF"
           echo "Upstream commit: $upstream_commit"
+          echo "Upstream commit position: $upstream_position"
 
           if git merge-base --is-ancestor "$upstream_commit" HEAD; then
             echo "Fork already contains upstream commit $upstream_commit"
@@ -72,8 +75,25 @@ jobs:
           git rm -r --ignore-unmatch .github/workflows
           git checkout "$current_commit" -- .github/workflows
           git add .github/workflows
-          git commit -m "chore(sync): merge upstream ANGLE $UPSTREAM_REF"
+          git commit \
+            -m "chore(sync): merge upstream ANGLE $UPSTREAM_REF" \
+            -m "Upstream-ANGLE-Commit: $upstream_commit" \
+            -m "Upstream-ANGLE-Commit-Position: $upstream_position"
 
           new_commit="$(git rev-parse HEAD)"
           echo "New fork commit: $new_commit"
           git push origin "HEAD:$TARGET_BRANCH"
+
+      - name: Trigger ANGLE Prebuilt
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run angle-prebuilt.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$TARGET_BRANCH" \
+            -f angle_ref="$TARGET_BRANCH" \
+            -f angle_commit="" \
+            -f release_tag="" \
+            -f artifact_run_id=""

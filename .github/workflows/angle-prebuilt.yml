@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       angle_ref:
-        description: ANGLE branch, tag, or ref to build.
+        description: Fork branch, tag, or ref to build.
         required: true
         default: main
       angle_commit:
-        description: Optional ANGLE commit SHA. Empty builds angle_ref HEAD.
+        description: Optional fork commit SHA. Empty builds angle_ref HEAD.
         required: false
         default: ""
       release_tag:
@@ -19,51 +19,20 @@ on:
         description: Optional workflow run ID whose angle-* artifacts should be reused for release.
         required: false
         default: ""
-  schedule:
-    - cron: "0 0 * * 0"
-  push:
-    branches:
-      - "**"
-  pull_request:
 
 permissions:
   contents: read
 
 concurrency:
   group: angle-prebuilt-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 jobs:
-  quick-check:
-    name: quick-check
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
-    steps:
-      - name: Check out workflow repository
-        uses: actions/checkout@v4
-
-      - name: Validate CI helpers
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -m py_compile .github/scripts/angle_ci.py
-          tmp="$(mktemp -d)"
-          for platform in linux darwin win32; do
-            for arch in x64 arm64; do
-              python3 .github/scripts/angle_ci.py gn-args \
-                --platform "$platform" \
-                --arch "$arch" \
-                --output "$tmp/$platform-$arch.args.gn" \
-                --json-output "$tmp/$platform-$arch.args.json" >/dev/null
-            done
-          done
-
   build:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     if: >-
-      github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == '')
+      github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == ''
     timeout-minutes: 360
     strategy:
       fail-fast: false
@@ -104,6 +73,7 @@ jobs:
         with:
           fetch-depth: 0
           path: angle
+          ref: ${{ inputs.angle_commit != '' && inputs.angle_commit || inputs.angle_ref }}
 
       - name: Preserve CI scripts
         shell: bash
@@ -163,42 +133,9 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             ref="${{ inputs.angle_ref }}"
             requested_commit="${{ inputs.angle_commit }}"
-            git remote add chromium https://chromium.googlesource.com/angle/angle.git 2>/dev/null || \
-              git remote set-url chromium https://chromium.googlesource.com/angle/angle.git
-            fetch_angle_ref() {
-              local refspec="$1"
-              git fetch chromium "$refspec"
-              if [[ "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
-                git fetch --unshallow chromium "$refspec"
-              fi
-            }
-
-            head_ref="${ref#refs/heads/}"
-            tag_ref="${ref#refs/tags/}"
-            if git ls-remote --exit-code --heads chromium "$head_ref" >/dev/null 2>&1; then
-              fetch_angle_ref "refs/heads/$head_ref"
-            elif git ls-remote --exit-code --tags chromium "$tag_ref" >/dev/null 2>&1; then
-              fetch_angle_ref "refs/tags/$tag_ref"
-            else
-              fetch_angle_ref "$ref"
-            fi
-
             if [[ -n "$requested_commit" ]]; then
-              fetch_angle_ref "$requested_commit" || true
               git checkout --detach "$requested_commit"
-            else
-              git checkout --detach FETCH_HEAD
             fi
-            effective_ref="$ref"
-          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
-            ref="main"
-            git remote add chromium https://chromium.googlesource.com/angle/angle.git 2>/dev/null || \
-              git remote set-url chromium https://chromium.googlesource.com/angle/angle.git
-            git fetch chromium "refs/heads/$ref"
-            if [[ "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
-              git fetch --unshallow chromium "refs/heads/$ref"
-            fi
-            git checkout --detach FETCH_HEAD
             effective_ref="$ref"
           else
             effective_ref="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
@@ -413,8 +350,7 @@ jobs:
     needs: build
     runs-on: macos-latest
     if: >-
-      github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == '')
+      github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == ''
     timeout-minutes: 60
     steps:
       - name: Check out workflow repository
@@ -461,13 +397,10 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       always() &&
+      github.event_name == 'workflow_dispatch' &&
       (
-        (github.event_name == 'workflow_dispatch' && inputs.artifact_run_id != '') ||
-        (
-          (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
-          needs.build.result == 'success' &&
-          needs.macos-universal.result == 'success'
-        )
+        inputs.artifact_run_id != '' ||
+        (needs.build.result == 'success' && needs.macos-universal.result == 'success')
       )
     permissions:
       actions: read
@@ -514,10 +447,6 @@ jobs:
               version="${BASH_REMATCH[1]}"
             else
               echo "::error::Unexpected archive name: $name"
-              exit 1
-            fi
-            if [[ "${{ github.event_name }}" == "schedule" && "$version" != main-* ]]; then
-              echo "::error::Scheduled release expected main-* version, got $version"
               exit 1
             fi
             tag="angle-$version"

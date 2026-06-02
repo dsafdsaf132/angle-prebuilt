@@ -284,6 +284,66 @@ def write_gn_args(args):
 
 def parse_angle_version(source_root, angle_ref):
     normalized_ref = (angle_ref or "").removeprefix("refs/heads/")
+    try:
+        position = subprocess.check_output(
+            [
+                "git",
+                "log",
+                "-1",
+                "--format=%(trailers:key=Upstream-ANGLE-Commit-Position,valueonly)",
+                "--grep=^Upstream-ANGLE-Commit-Position:",
+                "HEAD",
+            ],
+            cwd=source_root,
+            text=True,
+        ).strip()
+        if position:
+            if normalized_ref == "main":
+                return f"main-{position}"
+            return position
+    except subprocess.SubprocessError:
+        pass
+
+    try:
+        message = subprocess.check_output(
+            ["git", "log", "-1", "--format=%B", "HEAD"], cwd=source_root, text=True
+        )
+        footer = re.search(r"^Upstream-ANGLE-Commit-Position:\s*(\d+)\s*$", message, re.MULTILINE)
+        if footer:
+            version = footer.group(1)
+            if normalized_ref == "main":
+                return f"main-{version}"
+            return version
+    except subprocess.SubprocessError:
+        pass
+
+    try:
+        sync_commit = subprocess.check_output(
+            [
+                "git",
+                "log",
+                "-1",
+                "--format=%H",
+                "--grep=^chore(sync): merge upstream ANGLE",
+                "HEAD",
+            ],
+            cwd=source_root,
+            text=True,
+        ).strip()
+        if sync_commit:
+            upstream_parent = subprocess.check_output(
+                ["git", "rev-parse", f"{sync_commit}^2"], cwd=source_root, text=True
+            ).strip()
+            version = subprocess.check_output(
+                ["git", "rev-list", upstream_parent, "--count"], cwd=source_root, text=True
+            ).strip()
+            if version and version != "0":
+                if normalized_ref == "main":
+                    return f"main-{version}"
+                return version
+    except subprocess.SubprocessError:
+        pass
+
     commit_id = Path(source_root) / "src" / "commit_id.py"
     if commit_id.exists():
         try:

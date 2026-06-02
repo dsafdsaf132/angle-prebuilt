@@ -1,0 +1,38 @@
+name: Workflow Check
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-check-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quick-check:
+    name: quick-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate CI helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile .github/scripts/angle_ci.py
+          tmp="$(mktemp -d)"
+          for platform in linux darwin win32; do
+            for arch in x64 arm64; do
+              python3 .github/scripts/angle_ci.py gn-args \
+                --platform "$platform" \
+                --arch "$arch" \
+                --output "$tmp/$platform-$arch.args.gn" \
+                --json-output "$tmp/$platform-$arch.args.json" >/dev/null
+            done
+          done
