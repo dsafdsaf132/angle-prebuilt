@@ -9,17 +9,16 @@ It syncs, builds, and releases every Sunday at 00:00 UTC.
 
 | Target | Archive | CI |
 | --- | --- | --- |
-| Linux x64 | `angle-{version}-linux-x64.tar.gz` | [![Smoke passing][smoke-passing]][ci-workflow] |
-| Linux arm64 | `angle-{version}-linux-arm64.tar.gz` | [![Smoke passing][smoke-passing]][ci-workflow] |
-| macOS x64 | `angle-{version}-darwin-x64.tar.gz` | [![Smoke Skipped][smoke-skipped]][ci-workflow] |
-| macOS arm64 | `angle-{version}-darwin-arm64.tar.gz` | [![Smoke passing][smoke-passing]][ci-workflow] |
-| Windows x64 | `angle-{version}-win32-x64.zip` | [![Smoke passing][smoke-passing]][ci-workflow] |
-| Windows arm64 | `angle-{version}-win32-arm64.zip` | [![Smoke passing][smoke-passing]][ci-workflow] |
+| Linux x64 | `angle-{version}-linux-x64.tar.gz` | [![Smoke passed][smoke-passed]][ci-workflow] |
+| Linux arm64 | `angle-{version}-linux-arm64.tar.gz` | [![Smoke passed][smoke-passed]][ci-workflow] |
+| macOS x64 | `angle-{version}-darwin-x64.tar.gz` | [![Smoke skipped][smoke-skipped]][ci-workflow] |
+| macOS arm64 | `angle-{version}-darwin-arm64.tar.gz` | [![Smoke passed][smoke-passed]][ci-workflow] |
+| Windows x64 | `angle-{version}-win32-x64.zip` | [![Smoke passed][smoke-passed]][ci-workflow] |
+| Windows arm64 | `angle-{version}-win32-arm64.zip` | [![Smoke passed][smoke-passed]][ci-workflow] |
 
 [ci-workflow]: https://github.com/dsafdsaf132/angle-prebuilt/actions/workflows/angle-prebuilt.yml
-[smoke-passing]: https://img.shields.io/badge/Smoke-passing-brightgreen
-[smoke-running]: https://img.shields.io/badge/Smoke-running-yellow
-[smoke-skipped]: https://img.shields.io/badge/Smoke-Skipped-lightgrey
+[smoke-passed]: https://img.shields.io/badge/Smoke-passed-brightgreen
+[smoke-skipped]: https://img.shields.io/badge/Smoke-skipped-lightgrey
 
 ## Archive Layout
 
