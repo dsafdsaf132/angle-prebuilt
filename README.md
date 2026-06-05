@@ -13,6 +13,7 @@ It syncs, builds, and releases every Sunday at 00:00 UTC.
 | Linux arm64 | `angle-{version}-linux-arm64.tar.gz` | [![Smoke passed][smoke-passed]][ci-workflow] |
 | macOS x64 | `angle-{version}-darwin-x64.tar.gz` | [![Smoke skipped][smoke-skipped]][ci-workflow] |
 | macOS arm64 | `angle-{version}-darwin-arm64.tar.gz` | [![Smoke passed][smoke-passed]][ci-workflow] |
+| macOS universal | `angle-{version}-darwin-universal.tar.gz` | [![Smoke skipped][smoke-skipped]][ci-workflow] |
 | Windows x64 | `angle-{version}-win32-x64.zip` | [![Smoke passed][smoke-passed]][ci-workflow] |
 | Windows arm64 | `angle-{version}-win32-arm64.zip` | [![Smoke passed][smoke-passed]][ci-workflow] |
 

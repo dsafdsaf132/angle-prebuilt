@@ -382,17 +382,85 @@ jobs:
           path: ${{ runner.temp }}/artifacts/*
           if-no-files-found: error
 
+  macos_universal:
+    name: macos-universal
+    needs:
+      - build
+    runs-on: macos-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.artifact_run_id == '' &&
+      needs.build.result == 'success'
+    timeout-minutes: 60
+    steps:
+      - name: Check out workflow repository
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Download macOS x64 archive
+        uses: actions/download-artifact@v4
+        with:
+          name: angle-darwin-x64
+          path: ${{ runner.temp }}/universal-input/x64
+
+      - name: Download macOS arm64 archive
+        uses: actions/download-artifact@v4
+        with:
+          name: angle-darwin-arm64
+          path: ${{ runner.temp }}/universal-input/arm64
+
+      - name: Create macOS universal archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/artifacts"
+          x64_archive="$(find "$RUNNER_TEMP/universal-input/x64" -maxdepth 1 -type f -name '*.tar.gz' | head -n 1)"
+          arm64_archive="$(find "$RUNNER_TEMP/universal-input/arm64" -maxdepth 1 -type f -name '*.tar.gz' | head -n 1)"
+          python3 repo/.github/scripts/angle_ci.py universal \
+            --x64-archive "$x64_archive" \
+            --arm64-archive "$arm64_archive" \
+            --artifact-dir "$RUNNER_TEMP/artifacts"
+          ls -la "$RUNNER_TEMP/artifacts"
+
+      - name: Verify macOS universal archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$(find "$RUNNER_TEMP/artifacts" -maxdepth 1 -type f -name '*.tar.gz' | head -n 1)"
+          python3 repo/.github/scripts/angle_ci.py verify \
+            --archive "$archive" \
+            --platform darwin \
+            --arch universal \
+            --skip-smoke
+
+      - name: Skip macOS universal smoke test
+        shell: bash
+        run: |
+          echo "Skipping runtime smoke for macOS universal archive"
+
+      - name: Upload macOS universal archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: angle-darwin-universal
+          path: ${{ runner.temp }}/artifacts/*
+          if-no-files-found: error
+
   release:
     name: publish-release
     needs:
       - build
+      - macos_universal
     runs-on: ubuntu-latest
     if: >-
       always() &&
       github.event_name == 'workflow_dispatch' &&
       (
         inputs.artifact_run_id != '' ||
-        needs.build.result == 'success'
+        (
+          needs.build.result == 'success' &&
+          needs.macos_universal.result == 'success'
+        )
       )
     permissions:
       actions: read
