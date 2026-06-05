@@ -6997,6 +6997,41 @@ void main()
 }
 
 // Test that samplers in structs can be used on the right-hand side of a comma, where the expression
+// has side effect.
+TEST_P(GLSLTest_ES3, SamplerInStructRHSOfCommaWithSideEffect)
+{
+    constexpr char kFS[] = R"(#version 300 es
+precision mediump float;
+uniform struct {
+    sampler2D n;
+    vec2 c;
+} s[4];
+ivec4 global = ivec4(0);
+out vec4 color;
+void main()
+{
+    int i = 0;
+    (s, s[i += 1].n), (global.x = 10);
+    s[i += 2], s[i].c, (s[i - 1].n, (global.y = 20));
+    s[global.w = 80, i += 4].c, (global.z = 40);
+
+    int c11 = ((s, s[i += 8].n), (global.x += 1));
+    int c22 = (s[i += 16], s[i].c, (s[i - 1].n, (global.y += 2)));
+    int c43 = (s[global.w += 4, i += 32].c, (global.z += 3));
+    vec4 allOnes = vec4(((i += 64, s), 1.0));
+
+    color = vec4(i == 127,
+                 global.x == 11 && global.y == 22,
+                 global.z == 43 && global.w == 84,
+                 c11 == 11 && c22 == 22 && c43 == 43) * allOnes;
+})";
+
+    ANGLE_GL_PROGRAM(program, essl3_shaders::vs::Simple(), kFS);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::white);
+}
+
+// Test that samplers in structs can be used on the right-hand side of a comma, where the expression
 // has side effect, and that the struct field can be selected on the comma expression.
 TEST_P(GLSLTest_ES3, SamplerInStructRHSOfCommaWithSideEffectWithSelectField)
 {
@@ -24163,6 +24198,40 @@ TEST_P(GLSLTest_ES3, DynamicWriteStaticReadVaryingArray)
     // We use GLColor::white to verify it hit 1.0 across all channels.
     // (Note: 565 with no alpha, glReadPixels will pad alpha to 255).
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::white);
+}
+
+// Make sure gl_FragColor can be marked invariant in presence of GL_EXT_draw_buffers.
+TEST_P(GLSLTest, EmulateGLFragColorBroadcastInvariantFragColor)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_draw_buffers"));
+
+    constexpr char kFS[] = R"(#extension GL_EXT_draw_buffers : require
+        invariant gl_FragColor;
+        void main() {
+            gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+        }
+    )";
+
+    ANGLE_GL_PROGRAM(program, essl1_shaders::vs::Simple(), kFS);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::red);
+}
+
+// Make sure gl_FragColor can be marked invariant in presence of GL_EXT_draw_buffers, even if
+// gl_FragColor is unused.
+TEST_P(GLSLTest, EmulateGLFragColorBroadcastInvariantFragColorUnused)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_draw_buffers"));
+
+    constexpr char kFS[] = R"(#extension GL_EXT_draw_buffers : require
+        invariant gl_FragColor;
+        void main() {
+            // gl_FragColor is unused
+        }
+    )";
+
+    // Verify compilation only, as output is not written to.
+    ANGLE_GL_PROGRAM(program, essl1_shaders::vs::Simple(), kFS);
 }
 }  // anonymous namespace
 
