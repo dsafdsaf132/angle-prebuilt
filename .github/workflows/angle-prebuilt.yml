@@ -19,6 +19,13 @@ on:
         description: Optional workflow run ID whose angle-* artifacts should be reused for release.
         required: false
         default: ""
+  workflow_run:
+    workflows:
+      - Sync Fork
+    types:
+      - completed
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -28,11 +35,69 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.decide.outputs.should_build }}
+    permissions:
+      contents: read
+    steps:
+      - name: Decide whether to build
+        id: decide
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion || '' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          should_build=0
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            should_build=1
+          elif [[ "$EVENT_NAME" == "workflow_run" && "$WORKFLOW_RUN_CONCLUSION" == "success" ]]; then
+            commit_json="$(
+              curl -fsSL \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/main"
+            )"
+            message="$(
+              python3 -c 'import json, sys; print(json.load(sys.stdin)["commit"]["message"])' \
+                <<< "$commit_json"
+            )"
+            if [[ "$message" =~ Upstream-ANGLE-Commit-Position:[[:space:]]*([0-9]+) ]]; then
+              tag="angle-main-${BASH_REMATCH[1]}"
+              status="$(
+                curl -fsS -o /dev/null -w "%{http_code}" \
+                  -H "Authorization: Bearer $GH_TOKEN" \
+                  -H "Accept: application/vnd.github+json" \
+                  "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/tags/$tag" || true
+              )"
+              if [[ "$status" == "200" ]]; then
+                echo "Release $tag already exists; skipping build"
+              elif [[ "$status" == "404" ]]; then
+                echo "Release $tag is missing; building"
+                should_build=1
+              else
+                echo "::error::Could not check release $tag; HTTP status $status"
+                exit 1
+              fi
+            else
+              echo "Latest main is not an upstream sync commit; skipping workflow_run build"
+            fi
+          fi
+          echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
+
   build:
     name: ${{ matrix.target }}
+    needs:
+      - preflight
     runs-on: ${{ matrix.runner }}
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == ''
+      always() &&
+      needs.preflight.outputs.should_build == '1' &&
+      inputs.artifact_run_id == ''
     timeout-minutes: 360
     strategy:
       fail-fast: false
@@ -73,7 +138,7 @@ jobs:
         with:
           fetch-depth: 0
           path: angle
-          ref: ${{ inputs.angle_commit != '' && inputs.angle_commit || inputs.angle_ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.angle_commit != '' && inputs.angle_commit || inputs.angle_ref) || 'main' }}
 
       - name: Preserve CI scripts
         shell: bash
@@ -138,7 +203,7 @@ jobs:
             fi
             effective_ref="$ref"
           else
-            effective_ref="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
+            effective_ref="main"
           fi
 
           resolved_commit="$(git rev-parse HEAD)"
@@ -388,8 +453,6 @@ jobs:
       - build
     runs-on: macos-latest
     if: >-
-      github.event_name == 'workflow_dispatch' &&
-      inputs.artifact_run_id == '' &&
       needs.build.result == 'success'
     timeout-minutes: 60
     steps:
@@ -454,9 +517,11 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       always() &&
-      github.event_name == 'workflow_dispatch' &&
       (
-        inputs.artifact_run_id != '' ||
+        (
+          github.event_name == 'workflow_dispatch' &&
+          inputs.artifact_run_id != ''
+        ) ||
         (
           needs.build.result == 'success' &&
           needs.macos_universal.result == 'success'

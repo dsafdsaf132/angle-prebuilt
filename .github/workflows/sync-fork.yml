@@ -15,7 +15,6 @@ on:
     - cron: "0 23 * * 6"
 
 permissions:
-  actions: write
   contents: write
 
 concurrency:
@@ -83,17 +82,3 @@ jobs:
           new_commit="$(git rev-parse HEAD)"
           echo "New fork commit: $new_commit"
           git push origin "HEAD:$TARGET_BRANCH"
-
-      - name: Trigger ANGLE Prebuilt
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh workflow run angle-prebuilt.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref "$TARGET_BRANCH" \
-            -f angle_ref="$TARGET_BRANCH" \
-            -f angle_commit="" \
-            -f release_tag="" \
-            -f artifact_run_id=""
