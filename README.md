@@ -16,13 +16,13 @@ It syncs, builds, and releases every Sunday at 00:00 UTC.
 | Windows x64 | `angle-{version}-win32-x64.zip` | [![windows-x64][ci-windows-x64]][ci-workflow] |
 | Windows arm64 | `angle-{version}-win32-arm64.zip` | [![windows-arm64][ci-windows-arm64]][ci-workflow] |
 
-[ci-workflow]: https://github.com/dsafdsaf132/angle/actions/workflows/angle-prebuilt.yml
-[ci-linux-x64]: https://img.shields.io/github/actions/workflow/status/dsafdsaf132/angle/angle-prebuilt.yml?branch=main&job=linux-x64&label=linux-x64
-[ci-linux-arm64]: https://img.shields.io/github/actions/workflow/status/dsafdsaf132/angle/angle-prebuilt.yml?branch=main&job=linux-arm64&label=linux-arm64
-[ci-macos-x64]: https://img.shields.io/github/actions/workflow/status/dsafdsaf132/angle/angle-prebuilt.yml?branch=main&job=macos-x64&label=macos-x64
-[ci-macos-arm64]: https://img.shields.io/github/actions/workflow/status/dsafdsaf132/angle/angle-prebuilt.yml?branch=main&job=macos-arm64&label=macos-arm64
-[ci-windows-x64]: https://img.shields.io/github/actions/workflow/status/dsafdsaf132/angle/angle-prebuilt.yml?branch=main&job=windows-x64&label=windows-x64
-[ci-windows-arm64]: https://img.shields.io/github/actions/workflow/status/dsafdsaf132/angle/angle-prebuilt.yml?branch=main&job=windows-arm64&label=windows-arm64
+[ci-workflow]: https://github.com/dsafdsaf132/angle-prebuilt/actions/workflows/angle-prebuilt.yml
+[ci-linux-x64]: https://img.shields.io/github/actions/workflow/status/dsafdsaf132/angle-prebuilt/angle-prebuilt.yml?branch=main&job=linux-x64&label=linux-x64
+[ci-linux-arm64]: https://img.shields.io/github/actions/workflow/status/dsafdsaf132/angle-prebuilt/angle-prebuilt.yml?branch=main&job=linux-arm64&label=linux-arm64
+[ci-macos-x64]: https://img.shields.io/github/actions/workflow/status/dsafdsaf132/angle-prebuilt/angle-prebuilt.yml?branch=main&job=macos-x64&label=macos-x64
+[ci-macos-arm64]: https://img.shields.io/github/actions/workflow/status/dsafdsaf132/angle-prebuilt/angle-prebuilt.yml?branch=main&job=macos-arm64&label=macos-arm64
+[ci-windows-x64]: https://img.shields.io/github/actions/workflow/status/dsafdsaf132/angle-prebuilt/angle-prebuilt.yml?branch=main&job=windows-x64&label=windows-x64
+[ci-windows-arm64]: https://img.shields.io/github/actions/workflow/status/dsafdsaf132/angle-prebuilt/angle-prebuilt.yml?branch=main&job=windows-arm64&label=windows-arm64
 
 ## Archive Layout
 
