@@ -678,6 +678,10 @@ def compile_and_run_smoke(extract_root, target_platform, arch):
 
     run(cmd)
 
+    if target_platform == "darwin" and arch == "x64":
+        print("Skipping macOS x64 runtime smoke on hosted Intel runner")
+        return
+
     env = os.environ.copy()
     if target_platform == "linux":
         env["LD_LIBRARY_PATH"] = prepend_env_path(env.get("LD_LIBRARY_PATH"), str(lib_dir))
