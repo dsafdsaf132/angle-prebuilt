@@ -344,7 +344,7 @@ jobs:
             --gn-args-json "$RUNNER_TEMP/gn-args.json"
           ls -la "$RUNNER_TEMP/artifacts"
 
-      - name: Verify archive
+      - name: Verify archive layout and dependencies
         shell: bash
         working-directory: angle
         run: |
@@ -354,7 +354,26 @@ jobs:
             --archive "$archive" \
             --platform "${{ matrix.platform }}" \
             --arch "${{ matrix.arch }}" \
-            --source-root "$PWD"
+            --source-root "$PWD" \
+            --skip-smoke
+
+      - name: Run smoke test
+        if: ${{ matrix.platform != 'darwin' || matrix.arch != 'x64' }}
+        shell: bash
+        working-directory: angle
+        run: |
+          set -euo pipefail
+          archive="$(find "$RUNNER_TEMP/artifacts" -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) | head -n 1)"
+          python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" smoke \
+            --archive "$archive" \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}"
+
+      - name: Skip macOS x64 smoke test
+        if: ${{ matrix.platform == 'darwin' && matrix.arch == 'x64' }}
+        shell: bash
+        run: |
+          echo "Skipping runtime smoke for macOS x64 hosted Intel runner"
 
       - name: Upload archive artifact
         uses: actions/upload-artifact@v4

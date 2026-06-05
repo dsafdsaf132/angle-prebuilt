@@ -678,10 +678,6 @@ def compile_and_run_smoke(extract_root, target_platform, arch):
 
     run(cmd)
 
-    if target_platform == "darwin" and arch == "x64":
-        print("Skipping macOS x64 runtime smoke on hosted Intel runner")
-        return
-
     env = os.environ.copy()
     if target_platform == "linux":
         env["LD_LIBRARY_PATH"] = prepend_env_path(env.get("LD_LIBRARY_PATH"), str(lib_dir))
@@ -771,6 +767,13 @@ def verify_archive(args):
         extract_archive(args.archive, temp)
         validate_layout(temp, args.platform)
         check_dependencies(temp, args.platform, args.source_root)
+        if not args.skip_smoke:
+            compile_and_run_smoke(temp, args.platform, args.arch)
+
+
+def smoke_archive(args):
+    with tempfile.TemporaryDirectory() as temp:
+        extract_archive(args.archive, temp)
         compile_and_run_smoke(temp, args.platform, args.arch)
 
 
@@ -914,7 +917,14 @@ def main():
     verify.add_argument("--platform", choices=sorted(PLATFORM_GN_ARGS), required=True)
     verify.add_argument("--arch", choices=("x64", "arm64", "universal"), required=True)
     verify.add_argument("--source-root")
+    verify.add_argument("--skip-smoke", action="store_true")
     verify.set_defaults(func=verify_archive)
+
+    smoke = subparsers.add_parser("smoke")
+    smoke.add_argument("--archive", required=True)
+    smoke.add_argument("--platform", choices=sorted(PLATFORM_GN_ARGS), required=True)
+    smoke.add_argument("--arch", choices=("x64", "arm64", "universal"), required=True)
+    smoke.set_defaults(func=smoke_archive)
 
     outputs = subparsers.add_parser("list-outputs")
     outputs.add_argument("--build-dir", required=True)
