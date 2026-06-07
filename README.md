@@ -1,6 +1,6 @@
 # ANGLE Prebuilt
 
-This repository tracks upstream ANGLE and publishes ready-to-use archives for
+This repository tracks upstream [google/ANGLE](https://github.com/google/angle) and publishes ready-to-use archives for
 native EGL/OpenGL ES consumers.
 
 It syncs, builds, and releases every Sunday at 00:00 UTC.
@@ -18,8 +18,8 @@ It syncs, builds, and releases every Sunday at 00:00 UTC.
 | Windows arm64 | `angle-{version}-win32-arm64.zip` | [![Smoke passed][smoke-passed]][ci-workflow] |
 
 [ci-workflow]: https://github.com/dsafdsaf132/angle-prebuilt/actions/workflows/angle-prebuilt.yml
-[smoke-passed]: https://img.shields.io/badge/Smoke-passed-brightgreen
-[smoke-skipped]: https://img.shields.io/badge/Smoke-skipped-lightgrey
+[smoke-passed]: https://img.shields.io/badge/CI-Tested-brightgreen
+[smoke-skipped]: https://img.shields.io/badge/CI-BuildOnly-yellow
 
 ## Archive Layout
 
