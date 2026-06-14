@@ -254,16 +254,14 @@ jobs:
             /usr/lib/llvm-23/bin/llvm-ar --version
             runtime_dir="/usr/lib/llvm-23/lib/clang/23/lib"
             expected_builtins="$runtime_dir/aarch64-unknown-linux-gnu/libclang_rt.builtins.a"
-            actual_builtins="$(
-              find "$runtime_dir" -maxdepth 3 -type f \
-                \( -name 'libclang_rt.builtins-aarch64.a' -o -name 'libclang_rt.builtins-arm64.a' \) \
-                | head -n 1
-            )"
+            actual_builtins="$runtime_dir/linux/libclang_rt.builtins-aarch64.a"
             find "$runtime_dir" -maxdepth 3 -name 'libclang_rt.builtins*' -print
-            if [[ -n "$actual_builtins" && ! -e "$expected_builtins" ]]; then
-              sudo mkdir -p "$(dirname "$expected_builtins")"
-              sudo ln -sf "$actual_builtins" "$expected_builtins"
+            if [[ ! -f "$actual_builtins" ]]; then
+              echo "::error::Missing Linux ARM64 clang runtime: $actual_builtins"
+              exit 1
             fi
+            sudo mkdir -p "$(dirname "$expected_builtins")"
+            sudo ln -sfn "$actual_builtins" "$expected_builtins"
             test -e "$expected_builtins"
           fi
 
@@ -414,7 +412,13 @@ jobs:
         working-directory: angle
         run: |
           set -euo pipefail
-          archive="$(find "$RUNNER_TEMP/artifacts" -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) | head -n 1)"
+          mapfile -t archives < <(find "$RUNNER_TEMP/artifacts" -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) | sort)
+          if [[ "${#archives[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one archive in $RUNNER_TEMP/artifacts, found ${#archives[@]}"
+            printf '%s\n' "${archives[@]}"
+            exit 1
+          fi
+          archive="${archives[0]}"
           python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" verify \
             --archive "$archive" \
             --platform "${{ matrix.platform }}" \
@@ -428,7 +432,13 @@ jobs:
         working-directory: angle
         run: |
           set -euo pipefail
-          archive="$(find "$RUNNER_TEMP/artifacts" -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) | head -n 1)"
+          mapfile -t archives < <(find "$RUNNER_TEMP/artifacts" -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) | sort)
+          if [[ "${#archives[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one archive in $RUNNER_TEMP/artifacts, found ${#archives[@]}"
+            printf '%s\n' "${archives[@]}"
+            exit 1
+          fi
+          archive="${archives[0]}"
           python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" smoke \
             --archive "$archive" \
             --platform "${{ matrix.platform }}" \
@@ -478,8 +488,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/artifacts"
-          x64_archive="$(find "$RUNNER_TEMP/universal-input/x64" -maxdepth 1 -type f -name '*.tar.gz' | head -n 1)"
-          arm64_archive="$(find "$RUNNER_TEMP/universal-input/arm64" -maxdepth 1 -type f -name '*.tar.gz' | head -n 1)"
+          mapfile -t x64_archives < <(find "$RUNNER_TEMP/universal-input/x64" -maxdepth 1 -type f -name '*.tar.gz' | sort)
+          if [[ "${#x64_archives[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one macOS x64 archive, found ${#x64_archives[@]}"
+            printf '%s\n' "${x64_archives[@]}"
+            exit 1
+          fi
+          mapfile -t arm64_archives < <(find "$RUNNER_TEMP/universal-input/arm64" -maxdepth 1 -type f -name '*.tar.gz' | sort)
+          if [[ "${#arm64_archives[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one macOS arm64 archive, found ${#arm64_archives[@]}"
+            printf '%s\n' "${arm64_archives[@]}"
+            exit 1
+          fi
+          x64_archive="${x64_archives[0]}"
+          arm64_archive="${arm64_archives[0]}"
           python3 repo/.github/scripts/angle_ci.py universal \
             --x64-archive "$x64_archive" \
             --arm64-archive "$arm64_archive" \
@@ -490,7 +512,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive="$(find "$RUNNER_TEMP/artifacts" -maxdepth 1 -type f -name '*.tar.gz' | head -n 1)"
+          mapfile -t archives < <(find "$RUNNER_TEMP/artifacts" -maxdepth 1 -type f -name '*.tar.gz' | sort)
+          if [[ "${#archives[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one universal archive in $RUNNER_TEMP/artifacts, found ${#archives[@]}"
+            printf '%s\n' "${archives[@]}"
+            exit 1
+          fi
+          archive="${archives[0]}"
           python3 repo/.github/scripts/angle_ci.py verify \
             --archive "$archive" \
             --platform darwin \
@@ -562,11 +590,13 @@ jobs:
           if [[ -n "$explicit_tag" ]]; then
             tag="$explicit_tag"
           else
-            asset="$(find release-assets -maxdepth 1 -type f -name 'angle-*-linux-x64.tar.gz' | head -n 1)"
-            if [[ -z "$asset" ]]; then
-              echo "::error::Could not find linux-x64 archive for scheduled release tag resolution"
+            mapfile -t assets < <(find release-assets -maxdepth 1 -type f -name 'angle-*-linux-x64.tar.gz' | sort)
+            if [[ "${#assets[@]}" -ne 1 ]]; then
+              echo "::error::Expected exactly one linux-x64 archive for scheduled release tag resolution, found ${#assets[@]}"
+              printf '%s\n' "${assets[@]}"
               exit 1
             fi
+            asset="${assets[0]}"
             name="${asset##*/}"
             if [[ "$name" =~ ^angle-(.+)-linux-x64\.tar\.gz$ ]]; then
               version="${BASH_REMATCH[1]}"
