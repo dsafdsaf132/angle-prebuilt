@@ -79,6 +79,11 @@ angle_linux_parent_builder(
             target_platform = builder_config.target_platform.ANDROID,
         ),
     ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "all",
+        ],
+    ),
     gn_args = gn_args.config(
         configs = [
             "android_clang",
@@ -110,6 +115,11 @@ angle_linux_parent_builder(
             target_bits = 32,
             target_platform = builder_config.target_platform.ANDROID,
         ),
+    ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "all",
+        ],
     ),
     gn_args = gn_args.config(
         configs = [
@@ -143,6 +153,11 @@ angle_linux_parent_builder(
             target_bits = 64,
             target_platform = builder_config.target_platform.ANDROID,
         ),
+    ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "all",
+        ],
     ),
     gn_args = gn_args.config(
         configs = [
@@ -277,6 +292,11 @@ angle_linux_parent_builder(
             target_bits = 64,
             target_platform = builder_config.target_platform.LINUX,
         ),
+    ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "all",
+        ],
     ),
     gn_args = gn_args.config(
         configs = [
@@ -436,6 +456,11 @@ angle_mac_parent_builder(
             target_platform = builder_config.target_platform.MAC,
         ),
     ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "all",
+        ],
+    ),
     gn_args = gn_args.config(
         configs = [
             "component",
@@ -529,6 +554,11 @@ angle_win_parent_builder(
             target_platform = builder_config.target_platform.WIN,
         ),
     ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "all",
+        ],
+    ),
     gn_args = gn_args.config(
         configs = [
             "component",
@@ -560,6 +590,11 @@ angle_win_msvc_parent_builder(
             target_platform = builder_config.target_platform.WIN,
         ),
     ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "all",
+        ],
+    ),
     gn_args = gn_args.config(
         configs = [
             "component",
@@ -589,6 +624,11 @@ angle_win_msvc_parent_builder(
             target_bits = 64,
             target_platform = builder_config.target_platform.WIN,
         ),
+    ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "all",
+        ],
     ),
     gn_args = gn_args.config(
         configs = [
@@ -684,6 +724,11 @@ angle_win_msvc_parent_builder(
             target_platform = builder_config.target_platform.WIN,
         ),
     ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "all",
+        ],
+    ),
     gn_args = gn_args.config(
         configs = [
             "component",
@@ -714,6 +759,11 @@ angle_win_msvc_parent_builder(
             target_platform = builder_config.target_platform.WIN,
         ),
     ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "all",
+        ],
+    ),
     gn_args = gn_args.config(
         configs = [
             "component",
@@ -743,6 +793,11 @@ angle_win_parent_builder(
             target_bits = 32,
             target_platform = builder_config.target_platform.WIN,
         ),
+    ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "all",
+        ],
     ),
     gn_args = gn_args.config(
         configs = [
@@ -775,6 +830,11 @@ angle_win_msvc_parent_builder(
             target_platform = builder_config.target_platform.WIN,
         ),
     ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "all",
+        ],
+    ),
     gn_args = gn_args.config(
         configs = [
             "component",
@@ -804,6 +864,11 @@ angle_win_msvc_parent_builder(
             target_bits = 32,
             target_platform = builder_config.target_platform.WIN,
         ),
+    ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "all",
+        ],
     ),
     gn_args = gn_args.config(
         configs = [
@@ -872,6 +937,29 @@ ci.thin_tester(
         ),
         run_tests_serially = True,
     ),
+    targets = targets.bundle(
+        targets = [
+            "perf_no_trace_isolated_scripts",
+        ],
+        mixins = [
+            "gpu_pixel_4_stable",
+            "temp_band_below_30C",
+            "timeout_120m",
+        ],
+        per_test_modifications = {
+            "angle_perftests": targets.mixin(
+                args = [
+                    # Remove Vulkan tests.
+                    "-f",
+                    "*-*vulkan*:*Vulkan*",
+                ],
+            ),
+        },
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.ANDROID,
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "perf|android|arm64",
         short_name = "p4",
@@ -896,6 +984,20 @@ ci.thin_tester(
         ),
         run_tests_serially = True,
     ),
+    targets = targets.bundle(
+        targets = [
+            "android_gl_and_gles_gtests",
+            "android_no_vulkan_gtests",
+            "android_p4_isolated_scripts",
+        ],
+        mixins = [
+            "gpu_pixel_4_stable",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.ANDROID,
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "test|android|arm64|rel",
         short_name = "p4",
@@ -919,6 +1021,21 @@ ci.thin_tester(
             target_platform = builder_config.target_platform.ANDROID,
         ),
         run_tests_serially = True,
+    ),
+    targets = targets.bundle(
+        targets = [
+            "android_common_gtests",
+            "android_vulkan_specific_gtests",
+            "android_p6_isolated_scripts",
+        ],
+        mixins = [
+            "gpu_pixel_6_experimental",
+            "limited_capacity_bot",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.ANDROID,
     ),
     # Uncomment this entry when this experimental tester is actually in use.
     console_view_entry = consoles.console_view_entry(
@@ -946,6 +1063,43 @@ ci.thin_tester(
         ),
         run_tests_serially = True,
     ),
+    targets = targets.bundle(
+        targets = [
+            "perf_isolated_scripts",
+        ],
+        mixins = [
+            "gpu_pixel_6_stable",
+            "temp_band_below_30C",
+            "timeout_120m",
+        ],
+        per_test_modifications = {
+            "angle_perftests": targets.mixin(
+                args = [
+                    # Custom temp throttling for perf tests on pixel6
+                    # b/345514719.
+                    "--custom-throttling-temp=38",
+                ],
+            ),
+            "angle_trace_perf_native_tests": targets.mixin(
+                args = [
+                    # Custom temp throttling for perf tests on pixel6
+                    # b/345514719.
+                    "--custom-throttling-temp=38",
+                ],
+            ),
+            "angle_trace_perf_vulkan_tests": targets.mixin(
+                args = [
+                    # Custom temp throttling for perf tests on pixel6
+                    # b/345514719.
+                    "--custom-throttling-temp=38",
+                ],
+            ),
+        },
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.ANDROID,
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "perf|android|arm64",
         short_name = "p6",
@@ -969,6 +1123,20 @@ ci.thin_tester(
             target_platform = builder_config.target_platform.ANDROID,
         ),
         run_tests_serially = True,
+    ),
+    targets = targets.bundle(
+        targets = [
+            "android_common_gtests",
+            "android_vulkan_specific_gtests",
+            "android_p6_isolated_scripts",
+        ],
+        mixins = [
+            "gpu_pixel_6_stable",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.ANDROID,
     ),
     console_view_entry = consoles.console_view_entry(
         category = "test|android|arm64|rel",
@@ -994,6 +1162,21 @@ ci.thin_tester(
         ),
         run_tests_serially = True,
     ),
+    targets = targets.bundle(
+        targets = [
+            "android_common_gtests",
+            "android_gl_and_gles_gtests",
+            "android_p10_gtests",
+            "android_p10_isolated_scripts",
+        ],
+        mixins = [
+            "gpu_pixel_10_stable",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.ANDROID,
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "test|android|arm64|rel",
         short_name = "p10",
@@ -1018,6 +1201,22 @@ ci.thin_tester(
         ),
         run_tests_serially = True,
     ),
+    targets = targets.bundle(
+        targets = [
+            "android_common_gtests",
+            "android_vulkan_specific_gtests",
+            "android_s24_isolated_scripts",
+        ],
+        mixins = [
+            # crbug.com/419062315
+            "no_tombstones",
+            "samsung_s24_stable",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.ANDROID,
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "test|android|arm64|rel",
         short_name = "s24",
@@ -1040,6 +1239,7 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.LINUX,
         ),
+        use_test_trigger_cas = True,
         run_tests_serially = True,
     ),
     targets = targets.bundle(
@@ -1074,6 +1274,7 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.LINUX,
         ),
+        use_test_trigger_cas = True,
         run_tests_serially = True,
     ),
     targets = targets.bundle(
@@ -1112,6 +1313,19 @@ ci.thin_tester(
         ),
         run_tests_serially = True,
     ),
+    targets = targets.bundle(
+        targets = [
+            "perf_isolated_scripts",
+        ],
+        mixins = [
+            "linux_intel_uhd_630_stable",
+            "timeout_120m",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.LINUX,
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "perf|linux|x64",
         short_name = "630",
@@ -1134,6 +1348,7 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.LINUX,
         ),
+        use_test_trigger_cas = True,
         run_tests_serially = True,
     ),
     targets = targets.bundle(
@@ -1182,6 +1397,7 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.LINUX,
         ),
+        use_test_trigger_cas = True,
         run_tests_serially = True,
     ),
     targets = targets.bundle(
@@ -1220,6 +1436,19 @@ ci.thin_tester(
         ),
         run_tests_serially = True,
     ),
+    targets = targets.bundle(
+        targets = [
+            "perf_isolated_scripts",
+        ],
+        mixins = [
+            "linux_nvidia_gtx_1660_stable",
+            "timeout_120m",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.LINUX,
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "perf|linux|x64",
         short_name = "1660",
@@ -1242,6 +1471,7 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.LINUX,
         ),
+        use_test_trigger_cas = True,
         run_tests_serially = True,
     ),
     targets = targets.bundle(
@@ -1310,6 +1540,7 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.LINUX,
         ),
+        use_test_trigger_cas = True,
         run_tests_serially = True,
     ),
     targets = targets.bundle(
@@ -1381,8 +1612,20 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.MAC,
         ),
-        shallow = True,
+        use_test_trigger_cas = True,
         run_tests_serially = True,
+    ),
+    targets = targets.bundle(
+        targets = [
+            "mac_arm64_gtests",
+        ],
+        mixins = [
+            "mac_arm64_apple_m2_retina_gpu_stable",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.MAC,
     ),
     console_view_entry = consoles.console_view_entry(
         category = "test|mac|arm64|rel",
@@ -1406,7 +1649,18 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.MAC,
         ),
+        use_test_trigger_cas = True,
         run_tests_serially = True,
+    ),
+    targets = targets.bundle(
+        targets = [],
+        mixins = [
+            "mac_retina_amd_gpu_experimental",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.MAC,
     ),
     # Uncomment this entry when this experimental tester is actually in use.
     # console_view_entry = consoles.console_view_entry(
@@ -1432,7 +1686,20 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.MAC,
         ),
+        use_test_trigger_cas = True,
         run_tests_serially = True,
+    ),
+    targets = targets.bundle(
+        targets = [
+            "mac_x64_gtests",
+        ],
+        mixins = [
+            "mac_retina_amd_gpu_stable",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.MAC,
     ),
     console_view_entry = consoles.console_view_entry(
         category = "test|mac|x64|rel",
@@ -1456,7 +1723,20 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.MAC,
         ),
+        use_test_trigger_cas = True,
         run_tests_serially = True,
+    ),
+    targets = targets.bundle(
+        targets = [
+            "mac_x64_gtests",
+        ],
+        mixins = [
+            "mac_retina_amd_555x_gpu_stable",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.MAC,
     ),
     console_view_entry = consoles.console_view_entry(
         category = "test|mac|x64|rel",
@@ -1480,7 +1760,20 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.MAC,
         ),
+        use_test_trigger_cas = True,
         run_tests_serially = True,
+    ),
+    targets = targets.bundle(
+        targets = [
+            "mac_x64_gtests",
+        ],
+        mixins = [
+            "mac_mini_intel_gpu_experimental",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.MAC,
     ),
     # Uncomment this entry when this experimental tester is actually in use.
     console_view_entry = consoles.console_view_entry(
@@ -1506,7 +1799,20 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.MAC,
         ),
+        use_test_trigger_cas = True,
         run_tests_serially = True,
+    ),
+    targets = targets.bundle(
+        targets = [
+            "mac_x64_gtests",
+        ],
+        mixins = [
+            "mac_mini_intel_gpu_stable",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.MAC,
     ),
     console_view_entry = consoles.console_view_entry(
         category = "test|mac|x64|rel",
@@ -1530,8 +1836,18 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.WIN,
         ),
-        no_history = True,
+        use_test_trigger_cas = True,
         run_tests_serially = True,
+    ),
+    targets = targets.bundle(
+        targets = [],
+        mixins = [
+            "win10_intel_uhd_630_experimental",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.WINDOWS,
     ),
     # Uncomment this entry when this experimental tester is actually in use.
     # console_view_entry = consoles.console_view_entry(
@@ -1559,6 +1875,19 @@ ci.thin_tester(
         ),
         run_tests_serially = True,
     ),
+    targets = targets.bundle(
+        targets = [
+            "perf_isolated_scripts",
+        ],
+        mixins = [
+            "timeout_120m",
+            "win10_intel_uhd_630_stable",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.WINDOWS,
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "perf|win|x64",
         short_name = "630",
@@ -1581,8 +1910,63 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.WIN,
         ),
-        no_history = True,
+        use_test_trigger_cas = True,
         run_tests_serially = True,
+    ),
+    targets = targets.bundle(
+        targets = [
+            "common_isolated_scripts",
+            "win_common_gtests",
+        ],
+        mixins = [
+            "win10_intel_uhd_630_stable",
+        ],
+        per_test_modifications = {
+            "angle_end2end_tests": targets.per_test_modification(
+                mixins = targets.mixin(
+                    args = [
+                        # anglebug.com/40644897 suspecting device lost caused by
+                        # multiprocess.
+                        "--max-processes=1",
+                    ],
+                    swarming = targets.swarming(
+                        shards = 10,
+                    ),
+                ),
+                replacements = targets.replacements(
+                    args = {
+                        # crbug.com/506180945 low capacity in this pool.
+                        "--gtest_filter": "-*Vulkan_SwiftShader*:*D3D9*:*WebGPU*",
+                    },
+                ),
+            ),
+            "angle_restricted_trace_gold_tests": targets.mixin(
+                args = [
+                    # anglebug.com/42263955 flaky 4x8 pixel artifacts on Win
+                    # Intel.
+                    "--flaky-retries=1",
+                ],
+                swarming = targets.swarming(
+                    shards = 5,
+                ),
+            ),
+            "angle_trace_perf_vulkan_smoke_tests": targets.mixin(
+                swarming = targets.swarming(
+                    shards = 3,
+                ),
+            ),
+            "angle_white_box_tests": targets.mixin(
+                args = [
+                    # anglebug.com/40644897 suspecting device lost caused by
+                    # multiprocess.
+                    "--max-processes=1",
+                ],
+            ),
+        },
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.WINDOWS,
     ),
     console_view_entry = consoles.console_view_entry(
         category = "test|win|x64|rel",
@@ -1606,8 +1990,50 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.WIN,
         ),
-        no_history = True,
+        use_test_trigger_cas = True,
         run_tests_serially = True,
+    ),
+    targets = targets.bundle(
+        targets = [
+            "common_isolated_scripts",
+            "win_common_gtests",
+        ],
+        mixins = [
+            "win10_intel_uhd_770_stable",
+        ],
+        per_test_modifications = {
+            "angle_deqp_gles2_d3d11_tests": targets.mixin(
+                args = [
+                    # anglebug.com/352528974 suspecting OOM caused by
+                    # multiprocess.
+                    "--max-processes=2",
+                ],
+            ),
+            "angle_end2end_tests": targets.mixin(
+                args = [
+                    # anglebug.com/352528974 suspecting OOM caused by
+                    # multiprocess.
+                    "--max-processes=2",
+                ],
+                swarming = targets.swarming(
+                    shards = 5,
+                ),
+            ),
+            "angle_restricted_trace_gold_tests": targets.mixin(
+                swarming = targets.swarming(
+                    shards = 4,
+                ),
+            ),
+            "angle_trace_perf_vulkan_smoke_tests": targets.mixin(
+                swarming = targets.swarming(
+                    shards = 4,
+                ),
+            ),
+        },
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.WINDOWS,
     ),
     console_view_entry = consoles.console_view_entry(
         category = "test|win|x64|rel",
@@ -1631,8 +2057,18 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.WIN,
         ),
-        no_history = True,
+        use_test_trigger_cas = True,
         run_tests_serially = True,
+    ),
+    targets = targets.bundle(
+        targets = [],
+        mixins = [
+            "win10_nvidia_gtx_1660_experimental",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.WINDOWS,
     ),
     # Uncomment this entry when this experimental tester is actually in use.
     # console_view_entry = consoles.console_view_entry(
@@ -1660,6 +2096,19 @@ ci.thin_tester(
         ),
         run_tests_serially = True,
     ),
+    targets = targets.bundle(
+        targets = [
+            "perf_isolated_scripts",
+        ],
+        mixins = [
+            "timeout_120m",
+            "win10_nvidia_gtx_1660_stable",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.WINDOWS,
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "perf|win|x64",
         short_name = "1660",
@@ -1682,8 +2131,22 @@ ci.thin_tester(
             target_bits = 64,
             target_platform = builder_config.target_platform.WIN,
         ),
-        no_history = True,
+        use_test_trigger_cas = True,
         run_tests_serially = True,
+    ),
+    targets = targets.bundle(
+        targets = [
+            "common_isolated_scripts",
+            "win_common_gtests",
+            "win_nvidia_only_gtests",
+        ],
+        mixins = [
+            "win10_nvidia_gtx_1660_stable",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.WINDOWS,
     ),
     console_view_entry = consoles.console_view_entry(
         category = "test|win|x64|rel",

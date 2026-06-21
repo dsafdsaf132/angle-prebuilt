@@ -133,7 +133,7 @@ if (angle_build_all) {
     if (angle_build_mesa) {
       deps += [ "$angle_root/third_party/mesa" ]
     }
-    data_deps = [ "$angle_root/infra/test_trigger_cas:test_trigger_cas_all" ]
+    data_deps = [ "$angle_root/infra/orchestrator:orchestrator_all" ]
   }
 }
 
@@ -1695,7 +1695,7 @@ if (angle_standalone || build_with_chromium ||
     if (is_apple && !is_component_build) {
       ldflags = [
         "-install_name",
-        "@rpath/${target_name}.dylib",
+        "@rpath/${output_name}.dylib",
       ]
     }
 

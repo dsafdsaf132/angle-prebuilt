@@ -282,6 +282,17 @@ bool RequiresMultiviewClear(const FramebufferState &state, bool scissorTestEnabl
     return false;
 }
 
+bool IsEmulatedAlphaChannelTextureAttachment(const FramebufferAttachment *attachment)
+{
+    if (!attachment || attachment->type() != GL_TEXTURE)
+    {
+        return false;
+    }
+
+    const Texture *texture     = attachment->getTexture();
+    const TextureGL *textureGL = GetImplAs<TextureGL>(texture);
+    return textureGL->hasEmulatedAlphaChannel(attachment->getTextureImageIndex());
+}
 
 class [[nodiscard]] ScopedEXTTextureNorm16ReadbackWorkaround
 {
@@ -454,18 +465,6 @@ bool IsNonTrivialClearColor(const GLuint *color)
 }
 
 }  // namespace
-
-bool IsEmulatedAlphaChannelTextureAttachment(const gl::FramebufferAttachment *attachment)
-{
-    if (!attachment || attachment->type() != GL_TEXTURE)
-    {
-        return false;
-    }
-
-    const Texture *texture     = attachment->getTexture();
-    const TextureGL *textureGL = GetImplAs<TextureGL>(texture);
-    return textureGL->hasEmulatedAlphaChannel(attachment->getTextureImageIndex());
-}
 
 FramebufferGL::FramebufferGL(const gl::FramebufferState &data, GLuint id, bool emulatedAlpha)
     : FramebufferImpl(data),
@@ -1362,80 +1361,6 @@ angle::Result FramebufferGL::ensureAttachmentsInitialized(
 
     BlitGL *blitter = GetBlitGL(context);
     return blitter->clearFramebuffer(context, colorAttachments, depth, stencil, this);
-}
-
-angle::Result FramebufferGL::recreateFbo(const gl::Context *context)
-{
-    const FunctionsGL *functions = GetFunctionsGL(context);
-    StateManagerGL *stateManager = GetStateManagerGL(context);
-
-    stateManager->deleteFramebuffer(mFramebufferID);
-    mFramebufferID = 0;
-    functions->genFramebuffers(1, &mFramebufferID);
-    stateManager->bindFramebuffer(GL_FRAMEBUFFER, mFramebufferID);
-
-    const gl::FramebufferState &state = getState();
-    size_t numColorAttachments        = state.getColorAttachments().size();
-    gl::Framebuffer::DirtyBits dirtyBits;
-
-    // Setting dirty bits that require entry points from later context
-    // versions will crash, as syncState dereferences null function
-    // pointers.
-    for (size_t i = 0; i < numColorAttachments; ++i)
-    {
-        dirtyBits.set(Framebuffer::DIRTY_BIT_COLOR_ATTACHMENT_0 + i);
-    }
-    if (state.getDepthAttachment())
-    {
-        dirtyBits.set(Framebuffer::DIRTY_BIT_DEPTH_ATTACHMENT);
-    }
-    if (state.getStencilAttachment())
-    {
-        dirtyBits.set(Framebuffer::DIRTY_BIT_STENCIL_ATTACHMENT);
-    }
-    const DrawBuffersVector<GLenum> &drawBufferStates = state.getDrawBufferStates();
-    if (drawBufferStates[0] != GL_COLOR_ATTACHMENT0 ||
-        std::find_if_not(drawBufferStates.begin() + 1, drawBufferStates.end(),
-                         [](const GLenum &current) { return current == GL_NONE; }) !=
-            drawBufferStates.end())
-    {
-        dirtyBits.set(Framebuffer::DIRTY_BIT_DRAW_BUFFERS);
-    }
-    if (state.getReadBufferState() != GL_COLOR_ATTACHMENT0)
-    {
-        dirtyBits.set(Framebuffer::DIRTY_BIT_READ_BUFFER);
-    }
-    if (state.getDefaultWidth() != 0)
-    {
-        dirtyBits.set(Framebuffer::DIRTY_BIT_DEFAULT_WIDTH);
-    }
-    if (state.getDefaultHeight() != 0)
-    {
-        dirtyBits.set(Framebuffer::DIRTY_BIT_DEFAULT_HEIGHT);
-    }
-    if (state.getDefaultSamples() != 0)
-    {
-        dirtyBits.set(Framebuffer::DIRTY_BIT_DEFAULT_SAMPLES);
-    }
-    if (state.getDefaultFixedSampleLocations() != 0)
-    {
-        dirtyBits.set(Framebuffer::DIRTY_BIT_DEFAULT_FIXED_SAMPLE_LOCATIONS);
-    }
-    if (state.getDefaultLayers() != 0)
-    {
-        dirtyBits.set(Framebuffer::DIRTY_BIT_DEFAULT_LAYERS);
-    }
-    if (state.getWriteControlMode() != SrgbWriteControlMode::Default)
-    {
-        dirtyBits.set(Framebuffer::DIRTY_BIT_FRAMEBUFFER_SRGB_WRITE_CONTROL_MODE);
-    }
-    if (state.getFlipY() != GL_FALSE)
-    {
-        dirtyBits.set(Framebuffer::DIRTY_BIT_FLIP_Y);
-    }
-
-    // Leave other bits like DIRTY_BIT_FOVEATION alone.
-    return syncState(context, GL_FRAMEBUFFER, dirtyBits, gl::Command::Other);
 }
 
 angle::Result FramebufferGL::syncState(const gl::Context *context,

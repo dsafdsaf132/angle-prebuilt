@@ -2193,12 +2193,6 @@ void GenerateCaps(const FunctionsGL *functions,
          functions->isAtLeastGLES(gl::Version(3, 2)) ||
          functions->hasGLESExtension("GL_KHR_blend_equation_advanced_coherent"));
 
-    // PVRTC1 textures must be squares on Apple platforms.
-    if (IsApple())
-    {
-        limitations->squarePvrtc1 = true;
-    }
-
     // Check if the driver clamps constant blend color
     if (IsQualcomm(GetVendorID(functions)))
     {
@@ -2584,9 +2578,11 @@ void InitializeFeatures(const FunctionsGL *functions, angle::FeaturesGL *feature
     ANGLE_FEATURE_CONDITION(features, sanitizeAMDGPURendererString, IsLinux() && hasAMD);
 
     // http://crbug.com/1187513
-    // Imagination drivers are buggy with context switching. It needs to unbind fbo before context
+    // http://anglebug.com/519646871
+    // Several drivers are buggy with context switching. It needs to unbind fbo before context
     // switching to workadround the driver issues.
-    ANGLE_FEATURE_CONDITION(features, unbindFBOBeforeSwitchingContext, IsPowerVR(vendor));
+    ANGLE_FEATURE_CONDITION(features, unbindFBOBeforeSwitchingContext,
+                            IsPowerVR(vendor) || (IsWindows() && isNvidia));
 
     // http://crbug.com/1181068 and http://crbug.com/783979
     ANGLE_FEATURE_CONDITION(features, flushOnFramebufferChange,
@@ -2725,9 +2721,6 @@ void InitializeFeatures(const FunctionsGL *functions, angle::FeaturesGL *feature
     // exposed.
     ANGLE_FEATURE_CONDITION(features, bgraTexImageFormatsBroken, !isMesa && isQualcomm);
 
-    // https://crbug.com/493747593
-    ANGLE_FEATURE_CONDITION(features, recreateFboUponFlush, false);
-
     // https://crbug.com/520656244
     ANGLE_FEATURE_CONDITION(features, reattachFboDepthStencilOnReallocation,
                             !isMesa && isQualcomm && qualcommVersion < 878);
@@ -2819,7 +2812,6 @@ void InitializeFrontendFeatures(const FunctionsGL *functions, angle::FrontendFea
     ANGLE_FEATURE_CONDITION(features, clipCullDistanceBrokenWithPassthroughShaders, isQualcomm);
     ANGLE_FEATURE_CONDITION(features, noperspectiveInterpolationBrokenWithPassthroughShaders,
                             isQualcomm);
-    ANGLE_FEATURE_CONDITION(features, setNeedInitOnInvalidation, true);
 }
 
 void ReInitializeFeaturesAtGPUSwitch(const FunctionsGL *functions, angle::FeaturesGL *features)

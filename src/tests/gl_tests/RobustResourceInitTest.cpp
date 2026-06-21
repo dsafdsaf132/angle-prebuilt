@@ -307,6 +307,10 @@ class RobustResourceInitTestES3 : public RobustResourceInitTest
                                 GLenum internalFormatRGBA,
                                 GLenum internalFormatRGB,
                                 GLenum type);
+    template <typename PixelT>
+    void testIntegerRenderbufferInit(GLenum internalFormat, GLenum type);
+    template <typename PixelT>
+    void testFloatRenderbufferInit(GLenum internalFormat, GLenum type);
 };
 
 class RobustResourceInitTestES31 : public RobustResourceInitTest
@@ -382,19 +386,19 @@ TEST_P(RobustResourceInitTest, BufferData)
     glBufferData(GL_ARRAY_BUFFER, getWindowWidth() * getWindowHeight() * sizeof(GLfloat), nullptr,
                  GL_STATIC_DRAW);
 
-    constexpr char kVS[] =
-        "attribute vec2 position;\n"
-        "attribute float testValue;\n"
-        "varying vec4 colorOut;\n"
-        "void main() {\n"
-        "    gl_Position = vec4(position, 0, 1);\n"
-        "    colorOut = testValue == 0.0 ? vec4(0, 1, 0, 1) : vec4(1, 0, 0, 1);\n"
-        "}";
-    constexpr char kFS[] =
-        "varying mediump vec4 colorOut;\n"
-        "void main() {\n"
-        "    gl_FragColor = colorOut;\n"
-        "}";
+    constexpr char kVS[] = R"(
+        attribute vec2 position;
+        attribute float testValue;
+        varying vec4 colorOut;
+        void main() {
+            gl_Position = vec4(position, 0, 1);
+            colorOut = testValue == 0.0 ? vec4(0, 1, 0, 1) : vec4(1, 0, 0, 1);
+        })";
+    constexpr char kFS[] = R"(
+        varying mediump vec4 colorOut;
+        void main() {
+            gl_FragColor = colorOut;
+        })";
 
     ANGLE_GL_PROGRAM(program, kVS, kFS);
 
@@ -410,11 +414,127 @@ TEST_P(RobustResourceInitTest, BufferData)
 
     ASSERT_GL_NO_ERROR();
 
-    std::vector<GLColor> expected(getWindowWidth() * getWindowHeight(), GLColor::green);
-    std::vector<GLColor> actual(getWindowWidth() * getWindowHeight());
-    glReadPixels(0, 0, getWindowWidth(), getWindowHeight(), GL_RGBA, GL_UNSIGNED_BYTE,
-                 actual.data());
-    EXPECT_EQ(expected, actual);
+    EXPECT_PIXEL_RECT_EQ(0, 0, getWindowWidth(), getWindowHeight(), GLColor::green);
+
+    GLint initState = 0;
+    glBindBuffer(GL_ARRAY_BUFFER, buffer);
+    glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_RESOURCE_INITIALIZED_ANGLE, &initState);
+    EXPECT_GL_TRUE(initState);
+}
+
+// Tests that an existing buffer updated to be a smaller size after use is cleared in the new range.
+TEST_P(RobustResourceInitTest, BufferDataRedefinedAfterFinish)
+{
+    ANGLE_SKIP_TEST_IF(!hasGLExtension());
+
+    // The buffer is initially defined with twice the output size, and it is filled with non-zero
+    // data and used for draw.
+    const size_t outputSize = getWindowWidth() * getWindowHeight();
+    GLBuffer buffer;
+    std::vector<GLfloat> bufferInitData(2 * outputSize, 1.0);
+    glBindBuffer(GL_ARRAY_BUFFER, buffer);
+    glBufferData(GL_ARRAY_BUFFER, bufferInitData.size() * sizeof(GLfloat), bufferInitData.data(),
+                 GL_STATIC_DRAW);
+
+    constexpr char kVS[] = R"(
+        attribute vec2 position;
+        attribute float testValue;
+        varying vec4 colorOut;
+        void main() {
+            gl_Position = vec4(position, 0, 1);
+            colorOut = testValue == 0.0 ? vec4(0, 1, 0, 1) : vec4(1, 0, 0, 1);
+        })";
+    constexpr char kFS[] = R"(
+        varying mediump vec4 colorOut;
+        void main() {
+            gl_FragColor = colorOut;
+        })";
+
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
+
+    GLint testValueLoc = glGetAttribLocation(program, "testValue");
+    ASSERT_NE(-1, testValueLoc);
+
+    glBindBuffer(GL_ARRAY_BUFFER, buffer);
+    glVertexAttribPointer(testValueLoc, 1, GL_FLOAT, GL_FALSE, 4, nullptr);
+    glEnableVertexAttribArray(testValueLoc);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    drawQuad(program, "position", 0.5f);
+    ASSERT_GL_NO_ERROR();
+    EXPECT_PIXEL_RECT_EQ(0, 0, getWindowWidth(), getWindowHeight(), GLColor::red);
+
+    // At this point, the original buffer should no longer be in use due to the ops being finished.
+    // Now if the buffer size is redefined to a smaller size (same as output size) without any data
+    // specified, the new range should be cleared to zero and no longer hold the initial data.
+    glBindBuffer(GL_ARRAY_BUFFER, buffer);
+    glBufferData(GL_ARRAY_BUFFER, outputSize * sizeof(GLfloat), nullptr, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    drawQuad(program, "position", 0.5f);
+    ASSERT_GL_NO_ERROR();
+    EXPECT_PIXEL_RECT_EQ(0, 0, getWindowWidth(), getWindowHeight(), GLColor::green);
+
+    GLint initState = 0;
+    glBindBuffer(GL_ARRAY_BUFFER, buffer);
+    glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_RESOURCE_INITIALIZED_ANGLE, &initState);
+    EXPECT_GL_TRUE(initState);
+}
+
+// Tests that an existing buffer updated to be a smaller size while it is in use is staged for clear
+// in the new range.
+TEST_P(RobustResourceInitTest, BufferDataRedefinedBeforeFinish)
+{
+    ANGLE_SKIP_TEST_IF(!hasGLExtension());
+
+    // The buffer is initially defined with twice the output size, and it is filled with non-zero
+    // data and used for draw.
+    const size_t outputSize = getWindowWidth() * getWindowHeight();
+    GLBuffer buffer;
+    std::vector<GLfloat> bufferInitData(2 * outputSize, 1.0);
+    glBindBuffer(GL_ARRAY_BUFFER, buffer);
+    glBufferData(GL_ARRAY_BUFFER, bufferInitData.size() * sizeof(GLfloat), bufferInitData.data(),
+                 GL_STATIC_DRAW);
+
+    constexpr char kVS[] = R"(
+        attribute vec2 position;
+        attribute float testValue;
+        varying vec4 colorOut;
+        void main() {
+            gl_Position = vec4(position, 0, 1);
+            colorOut = testValue == 0.0 ? vec4(0, 1, 0, 1) : vec4(1, 0, 0, 1);
+        })";
+    constexpr char kFS[] = R"(
+        varying mediump vec4 colorOut;
+        void main() {
+            gl_FragColor = colorOut;
+        })";
+
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
+
+    GLint testValueLoc = glGetAttribLocation(program, "testValue");
+    ASSERT_NE(-1, testValueLoc);
+
+    glBindBuffer(GL_ARRAY_BUFFER, buffer);
+    glVertexAttribPointer(testValueLoc, 1, GL_FLOAT, GL_FALSE, 4, nullptr);
+    glEnableVertexAttribArray(testValueLoc);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    drawQuad(program, "position", 0.5f);
+    ASSERT_GL_NO_ERROR();
+
+    // At this point, the original buffer has been used for draw, but the pixels have not been read
+    // back yet. Now if the buffer size is redefined to a smaller size (same as output size) without
+    // any data specified, the new range should be staged for clear to zero. However, if the pixels
+    // are read back before a draw with the cleared buffer data, they should still reflect the old
+    // data used for the last draw.
+    glBindBuffer(GL_ARRAY_BUFFER, buffer);
+    glBufferData(GL_ARRAY_BUFFER, outputSize * sizeof(GLfloat), nullptr, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    EXPECT_PIXEL_RECT_EQ(0, 0, getWindowWidth(), getWindowHeight(), GLColor::red);
+
+    drawQuad(program, "position", 0.5f);
+    ASSERT_GL_NO_ERROR();
+    EXPECT_PIXEL_RECT_EQ(0, 0, getWindowWidth(), getWindowHeight(), GLColor::green);
 
     GLint initState = 0;
     glBindBuffer(GL_ARRAY_BUFFER, buffer);
@@ -1985,6 +2105,93 @@ void RobustResourceInitTestES3::testIntegerTextureInit(const char *samplerType,
     EXPECT_EQ(0, incorrectPixels);
 }
 
+template <typename PixelT>
+void RobustResourceInitTestES3::testIntegerRenderbufferInit(GLenum internalFormat, GLenum type)
+{
+    ANGLE_SKIP_TEST_IF(!hasGLExtension());
+
+    GLRenderbuffer renderbuffer;
+    glBindRenderbuffer(GL_RENDERBUFFER, renderbuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER, internalFormat, kWidth, kHeight);
+    ASSERT_GL_NO_ERROR();
+
+    GLFramebuffer framebuffer;
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, renderbuffer);
+    ASSERT_GL_NO_ERROR();
+
+    std::array<PixelT, kWidth * kHeight * 4> data;
+    glReadPixels(0, 0, kWidth, kHeight, GL_RGBA_INTEGER, type, data.data());
+    ASSERT_GL_NO_ERROR();
+
+    int incorrectPixels = 0;
+    for (int y = 0; y < kHeight; ++y)
+    {
+        for (int x = 0; x < kWidth; ++x)
+        {
+            int index    = (y * kWidth + x) * 4;
+            bool correct = (data[index] == 0 && data[index + 1] == 0 && data[index + 2] == 0 &&
+                            data[index + 3] == 0);
+            incorrectPixels += (!correct ? 1 : 0);
+        }
+    }
+
+    EXPECT_EQ(0, incorrectPixels);
+}
+
+template <typename PixelT>
+void RobustResourceInitTestES3::testFloatRenderbufferInit(GLenum internalFormat, GLenum type)
+{
+    ANGLE_SKIP_TEST_IF(!hasGLExtension());
+
+    GLRenderbuffer renderbuffer;
+    glBindRenderbuffer(GL_RENDERBUFFER, renderbuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER, internalFormat, kWidth, kHeight);
+    ASSERT_GL_NO_ERROR();
+
+    GLFramebuffer framebuffer;
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, renderbuffer);
+    ASSERT_GL_NO_ERROR();
+
+    std::array<PixelT, kWidth * kHeight * 4> data;
+    glReadPixels(0, 0, kWidth, kHeight, GL_RGBA, type, data.data());
+    ASSERT_GL_NO_ERROR();
+
+    int incorrectPixels = 0;
+    for (int y = 0; y < kHeight; ++y)
+    {
+        for (int x = 0; x < kWidth; ++x)
+        {
+            int index    = (y * kWidth + x) * 4;
+            bool correct = (data[index] == 0.0f && data[index + 1] == 0.0f &&
+                            data[index + 2] == 0.0f && data[index + 3] == 0.0f);
+            incorrectPixels += (!correct ? 1 : 0);
+        }
+    }
+
+    EXPECT_EQ(0, incorrectPixels);
+}
+
+// Test that integer renderbuffers are initialized to zero.
+TEST_P(RobustResourceInitTestES3, RenderbufferInit_IntRGBA8)
+{
+    testIntegerRenderbufferInit<int32_t>(GL_RGBA8I, GL_INT);
+}
+
+// Test that unsigned integer renderbuffers are initialized to zero.
+TEST_P(RobustResourceInitTestES3, RenderbufferInit_UIntRGBA8)
+{
+    testIntegerRenderbufferInit<uint32_t>(GL_RGBA8UI, GL_UNSIGNED_INT);
+}
+
+// Test that floating point renderbuffers are initialized to zero.
+TEST_P(RobustResourceInitTestES3, RenderbufferInit_FloatRGBA32F)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_color_buffer_float"));
+    testFloatRenderbufferInit<GLfloat>(GL_RGBA32F, GL_FLOAT);
+}
+
 // Simple tests for integer formats that ANGLE must emulate on D3D11.
 TEST_P(RobustResourceInitTestES3, TextureInit_UIntRGB8)
 {
@@ -2741,6 +2948,101 @@ TEST_P(RobustResourceInitTestES3, Texture2DArrayPartiallyCleared)
         }
     }
     checkNonZeroPixels3D(&texture, 0, 0, kSize, kSize, kClearLayer, GLColor::green);
+    ASSERT_GL_NO_ERROR();
+}
+
+// Test that redefining a 2D array texture doesn't bypass robust resource initialization.
+TEST_P(RobustResourceInitTestES3, Texture2DArrayRedefine)
+{
+    ANGLE_SKIP_TEST_IF(!hasGLExtension());
+
+    constexpr int kLargeWidth  = 256;
+    constexpr int kLargeHeight = 256;
+    constexpr int kLayers      = 4;
+
+    GLTexture seedTexture;
+    glBindTexture(GL_TEXTURE_2D_ARRAY, seedTexture);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, kLargeWidth, kLargeHeight, kLayers, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+
+    std::vector<GLColor> sentinelData(kLargeWidth * kLargeHeight * kLayers, GLColor::red);
+    glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, kLargeWidth, kLargeHeight, kLayers, GL_RGBA,
+                    GL_UNSIGNED_BYTE, sentinelData.data());
+
+    GLFramebuffer fb;
+    glBindFramebuffer(GL_FRAMEBUFFER, fb);
+    glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, seedTexture, 0, 0);
+    EXPECT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::red);
+
+    constexpr int kSmallSize = 1;
+
+    GLTexture texture;
+    glBindTexture(GL_TEXTURE_2D_ARRAY, texture);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, kSmallSize, kSmallSize, kLayers, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+
+    // Bind to framebuffer and read to force clear and populate cache.
+    glBindFramebuffer(GL_FRAMEBUFFER, fb);
+    glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, texture, 0, 0);
+    EXPECT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::transparentBlack);
+
+    // Redefine level 0 to the larger dimension.
+    // This should trigger release and reallocation of the underlying VkImage.
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, kLargeWidth, kLargeHeight, kLayers, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+
+    glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, texture, 0, 0);
+    EXPECT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+    static_assert(kWidth <= kLargeWidth && kHeight <= kLargeHeight);
+    for (int layer = 0; layer < kLayers; ++layer)
+    {
+        checkNonZeroPixels3D(&texture, 0, 0, 0, 0, layer, GLColor::transparentBlack);
+    }
+    ASSERT_GL_NO_ERROR();
+}
+
+// Test that redefining a 2D array texture to a compatible size (same size)
+// doesn't bypass robust resource initialization.
+TEST_P(RobustResourceInitTestES3, Texture2DArrayRedefineCompatible)
+{
+    ANGLE_SKIP_TEST_IF(!hasGLExtension());
+
+    constexpr int kSize   = 256;
+    constexpr int kLayers = 4;
+
+    GLTexture texture;
+    glBindTexture(GL_TEXTURE_2D_ARRAY, texture);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, kSize, kSize, kLayers, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+
+    std::vector<GLColor> sentinelData(kSize * kSize * kLayers, GLColor::red);
+    glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, kSize, kSize, kLayers, GL_RGBA,
+                    GL_UNSIGNED_BYTE, sentinelData.data());
+
+    GLFramebuffer fb;
+    glBindFramebuffer(GL_FRAMEBUFFER, fb);
+    glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, texture, 0, 0);
+    EXPECT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::red);
+
+    // Redefine level 0 to the same dimension.
+    // This should not trigger releaseImage(), but it must invalidate the level.
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, kSize, kSize, kLayers, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+
+    glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, texture, 0, 0);
+    EXPECT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+    static_assert(kWidth <= kSize && kHeight <= kSize);
+    for (int layer = 0; layer < kLayers; ++layer)
+    {
+        checkNonZeroPixels3D(&texture, 0, 0, 0, 0, layer, GLColor::transparentBlack);
+    }
     ASSERT_GL_NO_ERROR();
 }
 

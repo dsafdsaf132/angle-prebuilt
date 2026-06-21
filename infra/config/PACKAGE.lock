@@ -16,7 +16,7 @@
 			"name": "@chromium-luci",
 			"source": {
 				"repo": "https://chromium.googlesource.com/infra/chromium/+/refs/heads/main",
-				"revision": "b5db180b6ca4f82f62669c0acbbcc34655698d6a",
+				"revision": "8c0ad4ba2dc0a7f10a34376a631159162a823eeb",
 				"path": "starlark-libs/chromium-luci"
 			},
 			"lucicfg": "1.46.1"
@@ -25,7 +25,7 @@
 			"name": "@chromium-targets",
 			"source": {
 				"repo": "https://chromium.googlesource.com/chromium/src/+/refs/heads/main",
-				"revision": "0fb53e40ff85d8ce03e5bb53d4c039050439978f",
+				"revision": "3e534a722b84e126a5531f63b26ec7e1784325b2",
 				"path": "infra/config/targets"
 			},
 			"deps": [

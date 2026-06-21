@@ -6349,7 +6349,7 @@ FenceNVImpl *ContextVk::createFenceNV()
     return new FenceNVVk();
 }
 
-SyncImpl *ContextVk::createSync(const gl::Context *)
+SyncImpl *ContextVk::createSync()
 {
     return new SyncVk();
 }
@@ -8580,11 +8580,12 @@ void ContextVk::setDefaultUniformBlocksMinSizeForTesting(size_t minSize)
 angle::Result ContextVk::initializeMultisampleTextureToBlack(const gl::Context *context,
                                                              gl::Texture *glTexture)
 {
-    ASSERT(glTexture->getType() == gl::TextureType::_2DMultisample);
-    TextureVk *textureVk = vk::GetImpl(glTexture);
+    const gl::TextureType type = glTexture->getType();
+    ASSERT(type == gl::TextureType::_2DMultisample || type == gl::TextureType::_2DMultisampleArray);
+    const gl::ImageIndex imageIndex = gl::ImageIndex::MakeFromType(type, 0);
 
-    return textureVk->initializeContentsWithBlack(context, GL_NONE,
-                                                  gl::ImageIndex::Make2DMultisample());
+    TextureVk *textureVk = vk::GetImpl(glTexture);
+    return textureVk->initializeContentsWithBlack(context, GL_NONE, imageIndex);
 }
 
 void ContextVk::onProgramExecutableReset(ProgramExecutableVk *executableVk)
