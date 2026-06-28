@@ -606,6 +606,7 @@ jobs:
         env:
           ARTIFACT_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.artifact_run_id != '' && inputs.artifact_run_id || '' }}
           EVENT_NAME: ${{ github.event_name }}
+          INPUT_ANGLE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.angle_commit || '' }}
           WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha || '' }}
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -618,6 +619,8 @@ jobs:
                 "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID"
             )"
             target_sha="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["head_sha"])' <<< "$run_json")"
+          elif [[ -n "$INPUT_ANGLE_COMMIT" ]]; then
+            target_sha="$INPUT_ANGLE_COMMIT"
           elif [[ "$EVENT_NAME" == "workflow_run" ]]; then
             target_sha="$WORKFLOW_RUN_HEAD_SHA"
           else
