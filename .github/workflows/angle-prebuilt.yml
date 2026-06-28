@@ -63,6 +63,10 @@ jobs:
             fi
             commit_json="$(
               curl -fsSL \
+                --retry 5 \
+                --retry-delay 5 \
+                --retry-all-errors \
+                --connect-timeout 20 \
                 -H "Authorization: Bearer $GH_TOKEN" \
                 -H "Accept: application/vnd.github+json" \
                 "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$WORKFLOW_RUN_HEAD_SHA"
@@ -75,6 +79,10 @@ jobs:
               tag="angle-main-${BASH_REMATCH[1]}"
               status="$(
                 curl -fsS -o /dev/null -w "%{http_code}" \
+                  --retry 5 \
+                  --retry-delay 5 \
+                  --retry-all-errors \
+                  --connect-timeout 20 \
                   -H "Authorization: Bearer $GH_TOKEN" \
                   -H "Accept: application/vnd.github+json" \
                   "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/tags/$tag" || true
@@ -230,8 +238,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
             g++ \
             libasound2-dev \
             libdrm-dev \
@@ -253,12 +261,17 @@ jobs:
             xvfb
           if [[ "${{ matrix.platform }}" == "linux" && "${{ matrix.arch }}" == "arm64" ]]; then
             sudo install -d -m 0755 /etc/apt/keyrings
-            curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | \
+            curl -fsSL \
+              --retry 5 \
+              --retry-delay 5 \
+              --retry-all-errors \
+              --connect-timeout 20 \
+              https://apt.llvm.org/llvm-snapshot.gpg.key | \
               sudo tee /etc/apt/keyrings/apt.llvm.org.asc >/dev/null
             echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble main" | \
               sudo tee /etc/apt/sources.list.d/llvm-toolchain-noble.list
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends \
+            sudo apt-get -o Acquire::Retries=5 update
+            sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
               clang-23 \
               libclang-rt-23-dev \
               lld-23 \
@@ -282,7 +295,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$RUNNER_TEMP/depot_tools"
+          retry() {
+            local attempt
+            for attempt in 1 2 3 4 5; do
+              if "$@"; then
+                return 0
+              fi
+              echo "Attempt $attempt failed: $*"
+              sleep $((attempt * 10))
+            done
+            "$@"
+          }
+          retry git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$RUNNER_TEMP/depot_tools"
           echo "$RUNNER_TEMP/depot_tools" >> "$GITHUB_PATH"
 
       - name: Configure gclient
@@ -325,7 +349,17 @@ jobs:
               echo "gsutil prewarm returned non-zero; continuing with gclient sync"
           fi
           echo "gclient sync jobs: $sync_jobs"
-          gclient sync --no-history --shallow --delete_unversioned_trees --reset --jobs "$sync_jobs"
+          for attempt in 1 2 3; do
+            if gclient sync --no-history --shallow --delete_unversioned_trees --reset --jobs "$sync_jobs"; then
+              break
+            fi
+            if [[ "$attempt" == "3" ]]; then
+              echo "::error::gclient sync failed after $attempt attempts"
+              exit 1
+            fi
+            echo "gclient sync attempt $attempt failed; retrying"
+            sleep $((attempt * 30))
+          done
 
       - name: Patch Windows ARM64 toolchain debugger copy
         if: matrix.platform == 'win32' && matrix.arch == 'arm64'
@@ -617,6 +651,10 @@ jobs:
           elif [[ -n "$ARTIFACT_RUN_ID" ]]; then
             run_json="$(
               curl -fsSL \
+                --retry 5 \
+                --retry-delay 5 \
+                --retry-all-errors \
+                --connect-timeout 20 \
                 -H "Authorization: Bearer $GH_TOKEN" \
                 -H "Accept: application/vnd.github+json" \
                 "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID"
@@ -642,6 +680,14 @@ jobs:
           merge-multiple: true
           run-id: ${{ github.event_name == 'workflow_dispatch' && inputs.artifact_run_id != '' && inputs.artifact_run_id || github.run_id }}
           github-token: ${{ github.token }}
+
+      - name: Validate release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 repo/.github/scripts/angle_ci.py validate-release-assets \
+            --artifact-root release-assets \
+            --expected-commit "$RELEASE_TARGET_SHA"
 
       - name: Resolve release tag
         shell: bash

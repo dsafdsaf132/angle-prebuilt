@@ -21,6 +21,15 @@ from pathlib import Path
 
 HEADER_DIRS = ("EGL", "GLES", "GLES2", "GLES3", "KHR")
 RELEASE_DIR = Path("angle") / "out" / "Release"
+EXPECTED_RELEASE_ARCHIVES = {
+    "linux-x64.tar.gz": ("linux", "x64"),
+    "linux-arm64.tar.gz": ("linux", "arm64"),
+    "darwin-x64.tar.gz": ("darwin", "x64"),
+    "darwin-arm64.tar.gz": ("darwin", "arm64"),
+    "darwin-universal.tar.gz": ("darwin", "universal"),
+    "win32-x64.zip": ("win32", "x64"),
+    "win32-arm64.zip": ("win32", "arm64"),
+}
 
 COMMON_GN_ARGS = {
     "is_debug": False,
@@ -551,7 +560,10 @@ def extract_archive(archive_path, destination):
             archive.extractall(destination)
     else:
         with tarfile.open(archive_path) as archive:
-            archive.extractall(destination)
+            try:
+                archive.extractall(destination, filter="data")
+            except TypeError:
+                archive.extractall(destination)
 
 
 def required_libraries(target_platform):
@@ -940,6 +952,70 @@ def release_notes(args):
     Path(args.output).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def validate_release_assets(args):
+    artifact_root = Path(args.artifact_root)
+    archives = sorted(
+        path
+        for path in artifact_root.rglob("*")
+        if path.is_file() and (path.suffix == ".zip" or path.name.endswith(".tar.gz"))
+    )
+    if len(archives) != len(EXPECTED_RELEASE_ARCHIVES):
+        raise RuntimeError(
+            f"Expected {len(EXPECTED_RELEASE_ARCHIVES)} release archives, found {len(archives)}"
+        )
+
+    seen = {}
+    versions = set()
+    commits = set()
+    for archive in archives:
+        version, suffix = parse_release_asset_name(archive.name)
+        if suffix in seen:
+            raise RuntimeError(f"Duplicate release archive target {suffix}: {seen[suffix]} and {archive}")
+        seen[suffix] = archive
+        versions.add(version)
+
+        platform, arch = EXPECTED_RELEASE_ARCHIVES[suffix]
+        with tempfile.TemporaryDirectory() as temp:
+            extract_archive(archive, temp)
+            validate_layout(temp, platform)
+            metadata = load_json(Path(temp) / "angle" / "angle-build.json")
+            if metadata.get("platform") != platform:
+                raise RuntimeError(f"{archive.name} metadata platform is {metadata.get('platform')}")
+            if metadata.get("arch") != arch:
+                raise RuntimeError(f"{archive.name} metadata arch is {metadata.get('arch')}")
+            commit = metadata.get("angleCommit")
+            if not commit:
+                raise RuntimeError(f"{archive.name} metadata is missing angleCommit")
+            commits.add(commit)
+
+    missing = sorted(set(EXPECTED_RELEASE_ARCHIVES) - set(seen))
+    extra = sorted(set(seen) - set(EXPECTED_RELEASE_ARCHIVES))
+    if missing or extra:
+        raise RuntimeError(f"Release archive set mismatch; missing={missing}, extra={extra}")
+    if len(versions) != 1:
+        raise RuntimeError(f"Release archives contain multiple versions: {sorted(versions)}")
+    if len(commits) != 1:
+        raise RuntimeError(f"Release archives contain multiple ANGLE commits: {sorted(commits)}")
+    commit = next(iter(commits))
+    if args.expected_commit and commit != args.expected_commit:
+        raise RuntimeError(f"Release archives were built from {commit}, expected {args.expected_commit}")
+
+    print(f"release-assets ok: version={next(iter(versions))} commit={commit}")
+
+
+def parse_release_asset_name(name):
+    if not name.startswith("angle-"):
+        raise RuntimeError(f"Unexpected release archive name: {name}")
+    for suffix in EXPECTED_RELEASE_ARCHIVES:
+        full_suffix = f"-{suffix}"
+        if name.endswith(full_suffix):
+            version = name[len("angle-") : -len(full_suffix)]
+            if not version:
+                raise RuntimeError(f"Missing version in release archive name: {name}")
+            return version, suffix
+    raise RuntimeError(f"Unexpected release archive name: {name}")
+
+
 def self_test(args):
     with tempfile.TemporaryDirectory() as temp:
         pe_path = Path(temp) / "minimal-arm64.dll"
@@ -947,7 +1023,57 @@ def self_test(args):
         imports = read_pe_imports(pe_path)
         if imports != ["KERNEL32.dll"]:
             raise AssertionError(f"Unexpected PE imports: {imports!r}")
+        artifact_root = Path(temp) / "release-assets"
+        create_minimal_release_archives(artifact_root)
+        validate_release_assets(
+            argparse.Namespace(
+                artifact_root=str(artifact_root),
+                expected_commit="0123456789abcdef0123456789abcdef01234567",
+            )
+        )
         print("self-test ok")
+
+
+def create_minimal_release_archives(artifact_root):
+    version = "main-1"
+    commit = "0123456789abcdef0123456789abcdef01234567"
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    for suffix, (platform, arch) in EXPECTED_RELEASE_ARCHIVES.items():
+        with tempfile.TemporaryDirectory() as temp:
+            package_root = Path(temp) / "package"
+            angle_root = package_root / "angle"
+            for header_dir in HEADER_DIRS:
+                header_path = angle_root / "include" / header_dir
+                header_path.mkdir(parents=True, exist_ok=True)
+                (header_path / "placeholder.h").write_text("/* test */\n", encoding="utf-8")
+            out_dir = package_root / RELEASE_DIR
+            out_dir.mkdir(parents=True, exist_ok=True)
+            for name in required_libraries(platform):
+                (out_dir / name).write_text("test\n", encoding="utf-8")
+            (angle_root / "LICENSE").write_text("test\n", encoding="utf-8")
+            (angle_root / "angle-build.json").write_text(
+                json.dumps(
+                    {
+                        "angleRef": "main",
+                        "angleCommit": commit,
+                        "platform": platform,
+                        "arch": arch,
+                        "buildType": "Release",
+                        "shared": True,
+                        "generatedAt": "2026-01-01T00:00:00Z",
+                        "gnArgs": {},
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            archive = artifact_root / f"angle-{version}-{suffix}"
+            if archive.suffix == ".zip":
+                create_zip(package_root, archive)
+            else:
+                create_tar_gz(package_root, archive)
 
 
 def create_minimal_pe(import_name):
@@ -1025,6 +1151,11 @@ def main():
     notes.add_argument("--artifact-root", required=True)
     notes.add_argument("--output", required=True)
     notes.set_defaults(func=release_notes)
+
+    release_assets = subparsers.add_parser("validate-release-assets")
+    release_assets.add_argument("--artifact-root", required=True)
+    release_assets.add_argument("--expected-commit")
+    release_assets.set_defaults(func=validate_release_assets)
 
     tests = subparsers.add_parser("self-test")
     tests.set_defaults(func=self_test)

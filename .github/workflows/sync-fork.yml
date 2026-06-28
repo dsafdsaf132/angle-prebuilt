@@ -42,14 +42,26 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          retry() {
+            local attempt
+            for attempt in 1 2 3 4 5; do
+              if "$@"; then
+                return 0
+              fi
+              echo "Attempt $attempt failed: $*"
+              sleep $((attempt * 10))
+            done
+            "$@"
+          }
+
           git remote add upstream https://chromium.googlesource.com/angle/angle.git 2>/dev/null || \
             git remote set-url upstream https://chromium.googlesource.com/angle/angle.git
           mkdir -p .git/info
           printf ".github/** merge=ours\n" >> .git/info/attributes
           git config merge.ours.driver true
 
-          git fetch origin "$TARGET_BRANCH"
-          git fetch upstream "$UPSTREAM_REF"
+          retry git fetch origin "$TARGET_BRANCH"
+          retry git fetch upstream "$UPSTREAM_REF"
 
           upstream_commit="$(git rev-parse FETCH_HEAD)"
           upstream_position="$(git rev-list "$upstream_commit" --count)"
@@ -81,4 +93,4 @@ jobs:
 
           new_commit="$(git rev-parse HEAD)"
           echo "New fork commit: $new_commit"
-          git push origin "HEAD:$TARGET_BRANCH"
+          retry git push origin "HEAD:$TARGET_BRANCH"
