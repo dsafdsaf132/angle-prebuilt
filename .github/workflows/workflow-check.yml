@@ -26,6 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m py_compile .github/scripts/angle_ci.py
+          python3 .github/scripts/angle_ci.py self-test
           tmp="$(mktemp -d)"
           for target in linux:x64 linux:arm64 darwin:x64 darwin:arm64 win32:x64 win32:arm64; do
             platform="${target%%:*}"

@@ -45,7 +45,7 @@ jobs:
           git remote add upstream https://chromium.googlesource.com/angle/angle.git 2>/dev/null || \
             git remote set-url upstream https://chromium.googlesource.com/angle/angle.git
           mkdir -p .git/info
-          printf ".github/workflows/** merge=ours\n" >> .git/info/attributes
+          printf ".github/** merge=ours\n" >> .git/info/attributes
           git config merge.ours.driver true
 
           git fetch origin "$TARGET_BRANCH"
@@ -71,9 +71,9 @@ jobs:
             exit 1
           fi
 
-          git rm -r --ignore-unmatch .github/workflows
-          git checkout "$current_commit" -- .github/workflows
-          git add .github/workflows
+          git rm -r --ignore-unmatch .github
+          git checkout "$current_commit" -- .github
+          git add .github
           git commit \
             -m "chore(sync): merge upstream ANGLE $UPSTREAM_REF" \
             -m "Upstream-ANGLE-Commit: $upstream_commit" \

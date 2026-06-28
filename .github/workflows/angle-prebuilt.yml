@@ -49,6 +49,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion || '' }}
+          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha || '' }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -56,11 +57,15 @@ jobs:
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             should_build=1
           elif [[ "$EVENT_NAME" == "workflow_run" && "$WORKFLOW_RUN_CONCLUSION" == "success" ]]; then
+            if [[ -z "$WORKFLOW_RUN_HEAD_SHA" ]]; then
+              echo "::error::workflow_run event did not include head_sha"
+              exit 1
+            fi
             commit_json="$(
               curl -fsSL \
                 -H "Authorization: Bearer $GH_TOKEN" \
                 -H "Accept: application/vnd.github+json" \
-                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/main"
+                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$WORKFLOW_RUN_HEAD_SHA"
             )"
             message="$(
               python3 -c 'import json, sys; print(json.load(sys.stdin)["commit"]["message"])' \
@@ -84,7 +89,7 @@ jobs:
                 exit 1
               fi
             else
-              echo "Latest main is not an upstream sync commit; skipping workflow_run build"
+              echo "Triggering commit is not an upstream sync commit; skipping workflow_run build"
             fi
           fi
           echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
@@ -138,14 +143,22 @@ jobs:
         with:
           fetch-depth: 0
           path: angle
-          ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.angle_commit != '' && inputs.angle_commit || inputs.angle_ref) || 'main' }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || (inputs.angle_commit != '' && inputs.angle_commit || inputs.angle_ref) }}
+
+      - name: Check out CI helpers
+        uses: actions/checkout@v4
+        with:
+          path: ci
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github/scripts
 
       - name: Preserve CI scripts
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/angle-ci-scripts"
-          cp -R "$GITHUB_WORKSPACE/angle/.github/scripts/." "$RUNNER_TEMP/angle-ci-scripts/"
+          cp -R "$GITHUB_WORKSPACE/ci/.github/scripts/." "$RUNNER_TEMP/angle-ci-scripts/"
           echo "ANGLE_CI_SCRIPTS=$RUNNER_TEMP/angle-ci-scripts" >> "$GITHUB_ENV"
 
       - name: Check native runner architecture
@@ -588,6 +601,35 @@ jobs:
           set -euo pipefail
           echo "Artifact run ID: $ARTIFACT_RUN_ID"
 
+      - name: Resolve release target
+        shell: bash
+        env:
+          ARTIFACT_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.artifact_run_id != '' && inputs.artifact_run_id || '' }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha || '' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$ARTIFACT_RUN_ID" ]]; then
+            run_json="$(
+              curl -fsSL \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID"
+            )"
+            target_sha="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["head_sha"])' <<< "$run_json")"
+          elif [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            target_sha="$WORKFLOW_RUN_HEAD_SHA"
+          else
+            target_sha="$GITHUB_SHA"
+          fi
+          if [[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid release target SHA: $target_sha"
+            exit 1
+          fi
+          echo "Release target: $target_sha"
+          echo "RELEASE_TARGET_SHA=$target_sha" >> "$GITHUB_ENV"
+
       - name: Download archives
         uses: actions/download-artifact@v4
         with:
@@ -652,11 +694,11 @@ jobs:
           git fetch --force origin "+refs/tags/$tag:refs/tags/$tag" || true
           if git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null; then
             tag_commit="$(git rev-parse "refs/tags/$tag^{commit}")"
-            if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+            if [[ "$tag_commit" != "$RELEASE_TARGET_SHA" ]]; then
               if [[ "$RELEASE_TAG_EXPLICIT" != "1" ]]; then
                 echo "Tag $tag already points to $tag_commit; reusing it for commit-position asset upload"
               else
-                echo "::error::Tag $tag points to $tag_commit, not workflow commit $GITHUB_SHA"
+                echo "::error::Tag $tag points to $tag_commit, not release target $RELEASE_TARGET_SHA"
                 exit 1
               fi
             fi
@@ -667,7 +709,7 @@ jobs:
           else
             gh release create "$tag" release-assets/* \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
+              --target "$RELEASE_TARGET_SHA" \
               --title "$tag" \
               --notes-file release-notes.md
           fi

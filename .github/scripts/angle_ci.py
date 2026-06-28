@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tarfile
@@ -598,7 +599,7 @@ def validate_layout(extract_root, target_platform):
             raise KeyError(f"angle-build.json is missing {key}")
 
 
-def check_dependencies(extract_root, target_platform, source_root=None):
+def check_dependencies(extract_root, target_platform, source_root=None, arch=None):
     out_dir = Path(extract_root) / RELEASE_DIR
     if target_platform == "linux":
         for name in ("libEGL.so", "libGLESv2.so"):
@@ -613,35 +614,84 @@ def check_dependencies(extract_root, target_platform, source_root=None):
         for name in ("libEGL.dylib", "libGLESv2.dylib"):
             run(["otool", "-L", str(out_dir / name)])
     elif target_platform == "win32":
-        tool = find_windows_dependency_tool(source_root)
         for name in ("libEGL.dll", "libGLESv2.dll"):
             lib = out_dir / name
-            tool_name, tool_cmd = tool
-            if tool_name == "dumpbin":
-                run(tool_cmd + ["/DEPENDENTS", str(lib)])
-            elif tool_name == "llvm-readobj":
-                run(tool_cmd + ["--coff-imports", str(lib)])
-            else:
-                run(tool_cmd + ["-p", str(lib)])
+            imports = read_pe_imports(lib)
+            print(f"{name} imports:")
+            for imported in imports:
+                print(f"  {imported}")
+            if not imports:
+                raise RuntimeError(f"Could not read dynamic imports from {lib}")
 
 
-def find_windows_dependency_tool(source_root):
-    dumpbin = shutil.which("dumpbin")
-    if dumpbin:
-        return "dumpbin", [dumpbin]
+def read_pe_imports(path):
+    data = Path(path).read_bytes()
+    if len(data) < 0x40 or data[:2] != b"MZ":
+        raise RuntimeError(f"Not a PE executable: {path}")
 
-    if source_root:
-        source_root = Path(source_root)
-        llvm_readobj = source_root / "third_party" / "llvm-build" / "Release+Asserts" / "bin" / "llvm-readobj.exe"
-        if llvm_readobj.exists():
-            return "llvm-readobj", [str(llvm_readobj)]
+    pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+    if pe_offset + 24 > len(data) or data[pe_offset : pe_offset + 4] != b"PE\0\0":
+        raise RuntimeError(f"Missing PE signature: {path}")
 
-    for name in ("llvm-readobj", "objdump"):
-        path = shutil.which(name)
-        if path:
-            return name, [path]
+    coff_offset = pe_offset + 4
+    section_count = struct.unpack_from("<H", data, coff_offset + 2)[0]
+    optional_header_size = struct.unpack_from("<H", data, coff_offset + 16)[0]
+    optional_offset = coff_offset + 20
+    sections_offset = optional_offset + optional_header_size
+    if sections_offset + (section_count * 40) > len(data):
+        raise RuntimeError(f"Truncated PE section table: {path}")
 
-    raise FileNotFoundError("Could not find dumpbin, llvm-readobj, or objdump")
+    magic = struct.unpack_from("<H", data, optional_offset)[0]
+    if magic == 0x10B:
+        data_directory_offset = optional_offset + 96
+    elif magic == 0x20B:
+        data_directory_offset = optional_offset + 112
+    else:
+        raise RuntimeError(f"Unsupported PE optional header magic 0x{magic:04x}: {path}")
+
+    import_directory_entry = data_directory_offset + 8
+    if import_directory_entry + 8 > len(data):
+        raise RuntimeError(f"Missing PE import directory: {path}")
+    import_rva, import_size = struct.unpack_from("<II", data, import_directory_entry)
+    if import_rva == 0 or import_size == 0:
+        return []
+
+    sections = []
+    for index in range(section_count):
+        offset = sections_offset + (index * 40)
+        virtual_size, virtual_address, raw_size, raw_pointer = struct.unpack_from(
+            "<IIII", data, offset + 8
+        )
+        sections.append((virtual_address, max(virtual_size, raw_size), raw_pointer, raw_size))
+
+    def rva_to_offset(rva):
+        for virtual_address, virtual_size, raw_pointer, raw_size in sections:
+            if virtual_address <= rva < virtual_address + virtual_size:
+                file_offset = raw_pointer + (rva - virtual_address)
+                if file_offset >= raw_pointer + raw_size or file_offset >= len(data):
+                    raise RuntimeError(f"PE RVA 0x{rva:x} points outside raw data: {path}")
+                return file_offset
+        raise RuntimeError(f"Could not map PE RVA 0x{rva:x}: {path}")
+
+    def read_c_string(offset):
+        end = data.find(b"\0", offset)
+        if end == -1:
+            raise RuntimeError(f"Unterminated PE string at 0x{offset:x}: {path}")
+        return data[offset:end].decode("ascii", errors="replace")
+
+    imports = []
+    descriptor_offset = rva_to_offset(import_rva)
+    while True:
+        if descriptor_offset + 20 > len(data):
+            raise RuntimeError(f"Truncated PE import descriptor: {path}")
+        descriptor = struct.unpack_from("<IIIII", data, descriptor_offset)
+        if descriptor == (0, 0, 0, 0, 0):
+            break
+        name_rva = descriptor[3]
+        imports.append(read_c_string(rva_to_offset(name_rva)))
+        descriptor_offset += 20
+
+    return sorted(set(imports), key=str.lower)
 
 
 def compile_and_run_smoke(extract_root, target_platform, arch):
@@ -766,7 +816,7 @@ def verify_archive(args):
     with tempfile.TemporaryDirectory() as temp:
         extract_archive(args.archive, temp)
         validate_layout(temp, args.platform)
-        check_dependencies(temp, args.platform, args.source_root)
+        check_dependencies(temp, args.platform, args.source_root, args.arch)
         if not args.skip_smoke:
             compile_and_run_smoke(temp, args.platform, args.arch)
 
@@ -890,6 +940,41 @@ def release_notes(args):
     Path(args.output).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def self_test(args):
+    with tempfile.TemporaryDirectory() as temp:
+        pe_path = Path(temp) / "minimal-arm64.dll"
+        pe_path.write_bytes(create_minimal_pe(import_name="KERNEL32.dll"))
+        imports = read_pe_imports(pe_path)
+        if imports != ["KERNEL32.dll"]:
+            raise AssertionError(f"Unexpected PE imports: {imports!r}")
+        print("self-test ok")
+
+
+def create_minimal_pe(import_name):
+    data = bytearray(0x400)
+    data[0:2] = b"MZ"
+    struct.pack_into("<I", data, 0x3C, 0x80)
+
+    pe_offset = 0x80
+    data[pe_offset : pe_offset + 4] = b"PE\0\0"
+    coff_offset = pe_offset + 4
+    optional_offset = coff_offset + 20
+    optional_size = 0xF0
+    section_offset = optional_offset + optional_size
+
+    struct.pack_into("<HHIIIHH", data, coff_offset, 0xAA64, 1, 0, 0, 0, optional_size, 0x2022)
+    struct.pack_into("<H", data, optional_offset, 0x20B)
+    data_directory_offset = optional_offset + 112
+    struct.pack_into("<II", data, data_directory_offset + 8, 0x200, 40)
+
+    data[section_offset : section_offset + 8] = b".rdata\0\0"
+    struct.pack_into("<IIII", data, section_offset + 8, 0x200, 0x200, 0x200, 0x200)
+
+    struct.pack_into("<IIIII", data, 0x200, 0, 0, 0, 0x250, 0)
+    data[0x250 : 0x250 + len(import_name) + 1] = import_name.encode("ascii") + b"\0"
+    return bytes(data)
+
+
 def main():
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -940,6 +1025,9 @@ def main():
     notes.add_argument("--artifact-root", required=True)
     notes.add_argument("--output", required=True)
     notes.set_defaults(func=release_notes)
+
+    tests = subparsers.add_parser("self-test")
+    tests.set_defaults(func=self_test)
 
     args = parser.parse_args()
     args.func(args)
