@@ -695,24 +695,41 @@ jobs:
           tag="$RELEASE_TAG"
           cd repo
           git fetch --force origin "+refs/tags/$tag:refs/tags/$tag" || true
+          tag_needs_update=0
           if git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null; then
             tag_commit="$(git rev-parse "refs/tags/$tag^{commit}")"
             if [[ "$tag_commit" != "$RELEASE_TARGET_SHA" ]]; then
               if [[ "$RELEASE_TAG_EXPLICIT" != "1" ]]; then
-                echo "Tag $tag already points to $tag_commit; reusing it for commit-position asset upload"
+                echo "Tag $tag points to $tag_commit; will move it to release target $RELEASE_TARGET_SHA"
+                tag_needs_update=1
               else
                 echo "::error::Tag $tag points to $tag_commit, not release target $RELEASE_TARGET_SHA"
                 exit 1
               fi
             fi
+          else
+            tag_needs_update=1
           fi
           cd ..
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
           else
+            create_target="$RELEASE_TARGET_SHA"
+            if [[ "$create_target" != "$GITHUB_SHA" ]]; then
+              create_target="$GITHUB_SHA"
+            fi
             gh release create "$tag" release-assets/* \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$RELEASE_TARGET_SHA" \
+              --target "$create_target" \
               --title "$tag" \
               --notes-file release-notes.md
           fi
+          if [[ "$tag_needs_update" == "1" ]]; then
+            cd repo
+            git tag -f "$tag" "$RELEASE_TARGET_SHA"
+            git push --force origin "refs/tags/$tag"
+            cd ..
+          fi
+          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq .id)"
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            -f target_commitish="$RELEASE_TARGET_SHA" >/dev/null
