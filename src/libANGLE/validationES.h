@@ -67,17 +67,6 @@ bool ValidCompressedImageSize(const Context *context,
                               GLsizei width,
                               GLsizei height,
                               GLsizei depth);
-bool ValidCompressedSubImageSize(const Context *context,
-                                 GLenum internalFormat,
-                                 GLint xoffset,
-                                 GLint yoffset,
-                                 GLint zoffset,
-                                 GLsizei width,
-                                 GLsizei height,
-                                 GLsizei depth,
-                                 size_t textureWidth,
-                                 size_t textureHeight,
-                                 size_t textureDepth);
 bool ValidImageDataSize(const Context *context,
                         angle::EntryPoint entryPoint,
                         TextureType texType,
@@ -753,7 +742,6 @@ bool ValidateES3TexImage2DParameters(const Context *context,
                                      TextureTarget target,
                                      GLint level,
                                      GLenum internalformat,
-                                     bool isCompressed,
                                      bool isSubImage,
                                      GLint xoffset,
                                      GLint yoffset,
@@ -968,11 +956,6 @@ ANGLE_INLINE bool ValidateDrawInstancedCounts(const Context *context,
                                               GLsizei primcount,
                                               GLuint baseinstance)
 {
-    if (!context->getLimitations().instanceIdMayOverflow)
-    {
-        return true;
-    }
-
     angle::CheckedNumeric<GLuint> checkedSum = baseinstance;
     checkedSum += primcount - 1;
 

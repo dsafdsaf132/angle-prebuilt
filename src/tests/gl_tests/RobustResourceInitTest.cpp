@@ -5,10 +5,7 @@
 //
 // RobustResourceInitTest: Tests for GL_ANGLE_robust_resource_initialization.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
+#include "common/unsafe_buffers.h"
 #include "test_utils/ANGLETest.h"
 
 #include "test_utils/gl_raii.h"
@@ -2682,6 +2679,58 @@ TEST_P(RobustResourceInitTestES3, MaskedStencilClearBuffer)
     maskedStencilClear(clearFunc);
 }
 
+// Test that clearing a depth-stencil buffer with clearBufferfi when depthMask is disabled
+TEST_P(RobustResourceInitTestES3, MaskedDepthClearBufferfi)
+{
+    ANGLE_SKIP_TEST_IF(!hasGLExtension());
+
+    constexpr int kSize = 16;
+
+    GLRenderbuffer depthStencilBuffer;
+    glBindRenderbuffer(GL_RENDERBUFFER, depthStencilBuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, kSize, kSize);
+
+    GLTexture colorbuffer;
+    glBindTexture(GL_TEXTURE_2D, colorbuffer);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, kSize, kSize, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
+    GLFramebuffer framebuffer;
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorbuffer, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER,
+                              depthStencilBuffer);
+
+    ASSERT_GL_NO_ERROR();
+    ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+    glDepthMask(GL_FALSE);
+    glStencilMask(0xFF);
+
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glClearBufferfi(GL_DEPTH_STENCIL, 0, 0.5f, 0);
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::black);
+
+    glEnable(GL_DEPTH_TEST);
+    glViewport(0, 0, kSize, kSize);
+
+    ANGLE_GL_PROGRAM(drawGreen, essl1_shaders::vs::Simple(), essl1_shaders::fs::Green());
+    ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+
+    glDepthFunc(GL_GREATER);
+
+    // Depth buffer should be robust-init to 1.0f
+    // 0.99f NDC maps to 0.995f depth should fail the depth test
+    drawQuad(drawGreen, essl1_shaders::PositionAttrib(), 0.99f);
+    ASSERT_GL_NO_ERROR();
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::black) << "depth test GL_GREATER at 0.99f should fail";
+
+    glDepthFunc(GL_EQUAL);
+    drawQuad(drawRed, essl1_shaders::PositionAttrib(), 1.0f);  // 1.0f NDC maps to 1.0f depth
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::red) << "depth should be initialized to 1.0f";
+}
+
 template <int Size, typename InitializedTest>
 void VerifyRGBA8PixelRect(InitializedTest inInitialized)
 {
@@ -3005,6 +3054,107 @@ TEST_P(RobustResourceInitTestES3, Texture2DArrayRedefine)
     ASSERT_GL_NO_ERROR();
 }
 
+// Test that robust init is done correctly for array textures when updates pruning threshold is met.
+TEST_P(RobustResourceInitTestES3, Texture2DArrayPrunedSupersededUpdatesLeak)
+{
+    ANGLE_SKIP_TEST_IF(!hasGLExtension());
+
+    // We rely on AllocateNonZeroMemory configuration to verify this bug. This configuration
+    // overrides all new allocations with non-zero values, which allows us to catch if
+    // robust resource initialization Clear is bypassed.
+    constexpr int kLocalWidth  = 512;
+    constexpr int kLocalHeight = 512;
+    constexpr int kLayers      = 4;
+
+    GLFramebuffer fb;
+    glBindFramebuffer(GL_FRAMEBUFFER, fb);
+
+    GLTexture texture;
+    glBindTexture(GL_TEXTURE_2D_ARRAY, texture);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, kLocalWidth, kLocalHeight, kLayers, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    // Perform multiple sub-image updates to layer 0.
+    // Each update is 512 * 512 * 4 = 1 MiB.
+    // We do 17 updates (17 MiB staged), which exceeds the 16 MiB pruning threshold.
+    constexpr int kUpdateCount = 17;
+    std::vector<GLColor> zeroData(kLocalWidth * kLocalHeight, GLColor::transparentBlack);
+    for (int i = 0; i < kUpdateCount; ++i)
+    {
+        glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, kLocalWidth, kLocalHeight, 1, GL_RGBA,
+                        GL_UNSIGNED_BYTE, zeroData.data());
+    }
+
+    for (int layer = 1; layer < kLayers; ++layer)
+    {
+        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, texture, 0, layer);
+        EXPECT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+        checkCustomFramebufferNonZeroPixels(kLocalWidth, kLocalHeight, 0, 0, 0, 0,
+                                            GLColor::transparentBlack);
+    }
+
+    ASSERT_GL_NO_ERROR();
+}
+
+// Test that robust init is done correctly when an array texture is redefined to a larger layer
+// count
+TEST_P(RobustResourceInitTestES3, Texture2DArrayRedefinePrunedSupersededUpdatesLeak)
+{
+    ANGLE_SKIP_TEST_IF(!hasGLExtension());
+
+    constexpr int kLocalWidth  = 512;
+    constexpr int kLocalHeight = 512;
+    constexpr int kLayers1     = 2;
+    constexpr int kLayers2     = 4;
+
+    GLFramebuffer fb;
+    glBindFramebuffer(GL_FRAMEBUFFER, fb);
+
+    GLTexture texture;
+    glBindTexture(GL_TEXTURE_2D_ARRAY, texture);
+
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, kLocalWidth, kLocalHeight, kLayers1, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, kLocalWidth / 2, kLocalHeight / 2, kLayers1, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, texture, 0, 0);
+    ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+    glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::red);
+    ASSERT_GL_NO_ERROR();
+
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, kLocalWidth, kLocalHeight, kLayers2, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+
+    // Perform multiple sub-image updates to layers 0 and 1 to trigger pruning.
+    // Each update is 512 * 512 * 4 = 1 MB. Staging 17 updates (17 MB) exceeds the 16 MB
+    // pruning threshold and triggers staging-time updates pruning.
+    constexpr int kUpdateCount = 17;
+    std::vector<GLColor> zeroData(kLocalWidth * kLocalHeight, GLColor::transparentBlack);
+    for (int i = 0; i < kUpdateCount; ++i)
+    {
+        int layer = i % kLayers1;
+        glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, kLocalWidth, kLocalHeight, 1, GL_RGBA,
+                        GL_UNSIGNED_BYTE, zeroData.data());
+    }
+
+    for (int layer = kLayers1; layer < kLayers2; ++layer)
+    {
+        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, texture, 0, layer);
+        EXPECT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+        checkCustomFramebufferNonZeroPixels(kLocalWidth, kLocalHeight, 0, 0, 0, 0,
+                                            GLColor::transparentBlack);
+    }
+
+    ASSERT_GL_NO_ERROR();
+}
+
 // Test that redefining a 2D array texture to a compatible size (same size)
 // doesn't bypass robust resource initialization.
 TEST_P(RobustResourceInitTestES3, Texture2DArrayRedefineCompatible)
@@ -3071,8 +3221,10 @@ TEST_P(RobustResourceInitTestES3, CompressedSubImage)
         0xe0, 0x07, 0x00, 0xf8, 0x11, 0x10, 0x15, 0x00,
     };
 
-    std::vector<uint8_t> data(img_8x8_rgb_dxt1, img_8x8_rgb_dxt1 + ArraySize(img_8x8_rgb_dxt1));
-    std::vector<uint8_t> subData(img_4x4_rgb_dxt1, img_4x4_rgb_dxt1 + ArraySize(img_4x4_rgb_dxt1));
+    std::vector<uint8_t> data(img_8x8_rgb_dxt1,
+                              ANGLE_UNSAFE_TODO(img_8x8_rgb_dxt1 + ArraySize(img_8x8_rgb_dxt1)));
+    std::vector<uint8_t> subData(img_4x4_rgb_dxt1,
+                                 ANGLE_UNSAFE_TODO(img_4x4_rgb_dxt1 + ArraySize(img_4x4_rgb_dxt1)));
 
     GLTexture colorbuffer;
     glBindTexture(GL_TEXTURE_2D, colorbuffer);
@@ -3208,7 +3360,7 @@ TEST_P(RobustResourceInitTestES3, LargeCompressedImage2DArray)
     static_assert(kSubImageByteSize % 8 == 0);
     for (size_t i = 0; i < kSubImageByteSize; i += 8)
     {
-        memcpy(&subData[i], kRed_4x4_rgb_dxt1, sizeof(kRed_4x4_rgb_dxt1));
+        ANGLE_UNSAFE_TODO(memcpy(&subData[i], kRed_4x4_rgb_dxt1, sizeof(kRed_4x4_rgb_dxt1)));
     }
     glCompressedTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, kSubWidth, kSubHeight, kSubDepth,
                               GL_COMPRESSED_RGB_S3TC_DXT1_EXT, kSubImageByteSize, subData.data());
@@ -3327,7 +3479,7 @@ void main()
     for (size_t i = 0; i < textures.size(); i++)
     {
         glReadBuffer(GL_COLOR_ATTACHMENT0 + i);
-        EXPECT_PIXEL_COLOR_EQ(0, 0, expectedColors[i]) << " at attachment " << i;
+        ANGLE_UNSAFE_TODO(EXPECT_PIXEL_COLOR_EQ(0, 0, expectedColors[i])) << " at attachment " << i;
     }
 }
 

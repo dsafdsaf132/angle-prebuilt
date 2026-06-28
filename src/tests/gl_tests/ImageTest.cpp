@@ -1419,7 +1419,7 @@ void main()
                              mFetchYUVVSUniformLocation);
     }
 
-    void verifyResultsRenderbuffer(GLuint renderbuffer, GLubyte referenceColor[4])
+    void verifyResultsRenderbuffer(GLuint renderbuffer, const GLubyte referenceColor[4])
     {
         // Bind the renderbuffer to a framebuffer
         GLFramebuffer framebuffer;
@@ -1894,7 +1894,52 @@ void main()
 };
 
 class ImageTestES3 : public ImageTest
-{};
+{
+  public:
+    // Test exporting an EGL image with a non-zero level of a 2D texture, and importing it in
+    // another 2D texture.  The first callback is given the imported target texture to test.  The
+    // second callback is called at the end with the source 2D texture to verify it at the given
+    // level (corresponding to the target).
+    //
+    // Both callbacks take the texture's initial color as well as the texture dimension.  For the
+    // source texture, the texture's size at the given mip is passed, so the color and size values
+    // for both callbacks are identical.
+    void nonZeroLevelTest(
+        std::function<void(const GLTexture &, GLColor, uint32_t)> testTarget,
+        std::function<void(const GLTexture &, uint32_t, GLColor, uint32_t)> verifySourceAfterTest);
+
+    // Similar to nonZeroLevelTest, but the source texture is a 3D texture and a non-zero slice is
+    // exported.  This test cannot run on most targets because KHR_gl_texture_3D_image is typically
+    // not supported.
+    void nonZeroLevelAndSliceTest(
+        std::function<void(const GLTexture &, GLColor, uint32_t)> testTarget,
+        std::function<void(const GLTexture &, uint32_t, uint32_t, GLColor, uint32_t, uint32_t)>
+            verifySourceAfterTest);
+
+    // Similar to nonZeroLevelTest, but the source texture is a cube map and a non-zero face is
+    // exported.
+    void nonZeroLevelAndFaceTest(
+        std::function<void(const GLTexture &, GLColor, uint32_t)> testTarget,
+        std::function<void(const GLTexture &, uint32_t, uint32_t, GLColor, uint32_t)>
+            verifySourceAfterTest);
+
+    // Similar to nonZeroLevelTest, but where the target is a renderbuffer
+    void nonZeroLevelRBTest(
+        std::function<void(const GLRenderbuffer &, GLColor, uint32_t)> testTarget,
+        std::function<void(const GLTexture &, uint32_t, GLColor, uint32_t)> verifySourceAfterTest);
+
+    // Similar to nonZeroLevelAndSliceTest, but where the target is a renderbuffer
+    void nonZeroLevelAndSliceRBTest(
+        std::function<void(const GLRenderbuffer &, GLColor, uint32_t)> testTarget,
+        std::function<void(const GLTexture &, uint32_t, uint32_t, GLColor, uint32_t, uint32_t)>
+            verifySourceAfterTest);
+
+    // Similar to nonZeroLevelAndFaceTest, but where the target is a renderbuffer
+    void nonZeroLevelAndFaceRBTest(
+        std::function<void(const GLRenderbuffer &, GLColor, uint32_t)> testTarget,
+        std::function<void(const GLTexture &, uint32_t, uint32_t, GLColor, uint32_t)>
+            verifySourceAfterTest);
+};
 
 class ImageTestES31 : public ImageTest
 {};
@@ -8225,13 +8270,13 @@ TEST_P(ImageTest, Deletion)
     EGLWindow *window = getEGLWindow();
     ANGLE_SKIP_TEST_IF(!hasOESExt() || !hasBaseExt() || !has2DTextureExt());
 
-    GLubyte originalData[4] = {255, 0, 255, 255};
-    GLubyte updateData[4]   = {0, 255, 0, 255};
+    constexpr GLubyte kOriginalData[4] = {255, 0, 255, 255};
+    constexpr GLubyte kUpdateData[4]   = {0, 255, 0, 255};
 
     // Create the Image
     GLTexture source;
     EGLImageKHR image;
-    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, originalData,
+    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, kOriginalData,
                                   source, &image);
 
     // Create multiple targets
@@ -8245,16 +8290,16 @@ TEST_P(ImageTest, Deletion)
     source.reset();
 
     // Expect that both the targets have the original data
-    verifyResults2D(targetTexture, originalData);
-    verifyResultsRenderbuffer(targetRenderbuffer, originalData);
+    verifyResults2D(targetTexture, kOriginalData);
+    verifyResultsRenderbuffer(targetRenderbuffer, kOriginalData);
 
     // Update the data of the target
     glBindTexture(GL_TEXTURE_2D, targetTexture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, updateData);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kUpdateData);
 
     // Expect that both targets have the updated data
-    verifyResults2D(targetTexture, updateData);
-    verifyResultsRenderbuffer(targetRenderbuffer, updateData);
+    verifyResults2D(targetTexture, kUpdateData);
+    verifyResultsRenderbuffer(targetRenderbuffer, kUpdateData);
 
     // Delete the EGL image
     eglDestroyImageKHR(window->getDisplay(), image);
@@ -8262,11 +8307,11 @@ TEST_P(ImageTest, Deletion)
 
     // Update the data of the target back to the original data
     glBindTexture(GL_TEXTURE_2D, targetTexture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, originalData);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kOriginalData);
 
     // Expect that both targets have the original data again
-    verifyResults2D(targetTexture, originalData);
-    verifyResultsRenderbuffer(targetRenderbuffer, originalData);
+    verifyResults2D(targetTexture, kOriginalData);
+    verifyResultsRenderbuffer(targetRenderbuffer, kOriginalData);
 }
 
 TEST_P(ImageTest, MipLevels)
@@ -8284,29 +8329,29 @@ TEST_P(ImageTest, MipLevels)
     EGLWindow *window = getEGLWindow();
     ANGLE_SKIP_TEST_IF(!hasOESExt() || !hasBaseExt() || !has2DTextureExt());
 
-    const size_t mipLevels   = 3;
-    const size_t textureSize = 4;
-    std::vector<GLColor> mip0Data(textureSize * textureSize, GLColor::red);
-    std::vector<GLColor> mip1Data(mip0Data.size() << 1, GLColor::green);
-    std::vector<GLColor> mip2Data(mip0Data.size() << 2, GLColor::blue);
-    GLubyte *data[mipLevels] = {
-        reinterpret_cast<GLubyte *>(&mip0Data[0]),
-        reinterpret_cast<GLubyte *>(&mip1Data[0]),
-        reinterpret_cast<GLubyte *>(&mip2Data[0]),
+    const size_t kMipLevels   = 3;
+    const size_t kTextureSize = 4;
+    const std::vector<GLColor> mip0Data(kTextureSize * kTextureSize, GLColor::red);
+    const std::vector<GLColor> mip1Data(mip0Data.size() >> 2, GLColor::green);
+    const std::vector<GLColor> mip2Data(mip0Data.size() >> 4, GLColor::blue);
+    const GLColor *data[kMipLevels] = {
+        mip0Data.data(),
+        mip1Data.data(),
+        mip2Data.data(),
     };
 
     GLTexture source;
     glBindTexture(GL_TEXTURE_2D, source);
 
-    for (size_t level = 0; level < mipLevels; level++)
+    for (size_t level = 0; level < kMipLevels; level++)
     {
-        glTexImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), GL_RGBA, textureSize >> level,
-                     textureSize >> level, 0, GL_RGBA, GL_UNSIGNED_BYTE, data[level]);
+        glTexImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), GL_RGBA, kTextureSize >> level,
+                     kTextureSize >> level, 0, GL_RGBA, GL_UNSIGNED_BYTE, data[level]);
     }
 
     ASSERT_GL_NO_ERROR();
 
-    for (size_t level = 0; level < mipLevels; level++)
+    for (size_t level = 0; level < kMipLevels; level++)
     {
         // Create the Image
         EGLint attribs[] = {
@@ -8332,14 +8377,14 @@ TEST_P(ImageTest, MipLevels)
         createEGLImageTargetRenderbuffer(image, renderbufferTarget);
 
         // Expect that the targets have the same color as the source texture
-        verifyResults2D(textureTarget, data[level]);
-        verifyResultsRenderbuffer(renderbufferTarget, data[level]);
+        verifyResults2D(textureTarget, data[level][0].data());
+        verifyResultsRenderbuffer(renderbufferTarget, data[level][0].data());
 
         // Update the data by uploading data to the texture
-        std::vector<GLuint> textureUpdateData(textureSize * textureSize, level);
+        std::vector<GLuint> textureUpdateData(kTextureSize * kTextureSize, level);
         glBindTexture(GL_TEXTURE_2D, textureTarget);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, textureSize >> level, textureSize >> level, GL_RGBA,
-                        GL_UNSIGNED_BYTE, textureUpdateData.data());
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kTextureSize >> level, kTextureSize >> level,
+                        GL_RGBA, GL_UNSIGNED_BYTE, textureUpdateData.data());
         ASSERT_GL_NO_ERROR();
 
         // Expect that both the texture and renderbuffer see the updated texture data
@@ -8370,6 +8415,62 @@ TEST_P(ImageTest, MipLevels)
     }
 }
 
+// Test that non-zero base levels on an imported image result in an incomplete texture.
+TEST_P(ImageTestES3, MipLevelsNonZeroBaseLevel)
+{
+    EGLWindow *window = getEGLWindow();
+    ANGLE_SKIP_TEST_IF(!hasOESExt() || !hasBaseExt() || !has2DTextureExt());
+
+    constexpr size_t kMipLevels   = 3;
+    constexpr size_t kTextureSize = 4;
+    const std::vector<GLColor> mip0Data(kTextureSize * kTextureSize, GLColor::red);
+    const std::vector<GLColor> mip1Data(mip0Data.size() >> 2, GLColor::green);
+    const std::vector<GLColor> mip2Data(mip0Data.size() >> 4, GLColor::blue);
+    const GLColor *data[kMipLevels] = {
+        mip0Data.data(),
+        mip1Data.data(),
+        mip2Data.data(),
+    };
+
+    GLTexture source;
+    glBindTexture(GL_TEXTURE_2D, source);
+
+    for (size_t level = 0; level < kMipLevels; level++)
+    {
+        glTexImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), GL_RGBA, kTextureSize >> level,
+                     kTextureSize >> level, 0, GL_RGBA, GL_UNSIGNED_BYTE, data[level]);
+    }
+
+    ASSERT_GL_NO_ERROR();
+
+    // Create the Image, importing level 1
+    EGLint attribs[] = {
+        EGL_GL_TEXTURE_LEVEL_KHR,
+        1,
+        EGL_NONE,
+    };
+    EGLImageKHR image =
+        eglCreateImageKHR(window->getDisplay(), window->getContext(), EGL_GL_TEXTURE_2D_KHR,
+                          reinterpretHelper<EGLClientBuffer>(source), attribs);
+    ASSERT_EGL_SUCCESS();
+
+    // Create a texture target
+    GLTexture textureTarget;
+    createEGLImageTargetTexture2D(image, textureTarget);
+
+    // Set base level to 0, expect data from level 1 (which is where the EGL image is attached to).
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+    verifyResults2D(textureTarget, data[1][0].data());
+
+    // Set base level to non-zero, the texture should be incomplete.
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 1);
+    verifyResults2D(textureTarget, GLColor::black.data());
+
+    // Clean up
+    eglDestroyImageKHR(window->getDisplay(), image);
+    ASSERT_GL_NO_ERROR();
+}
+
 // Respecify the source texture, orphaning it.  The target texture should not have updated data.
 TEST_P(ImageTest, Respecification)
 {
@@ -8381,13 +8482,13 @@ TEST_P(ImageTest, Respecification)
     EGLWindow *window = getEGLWindow();
     ANGLE_SKIP_TEST_IF(!hasOESExt() || !hasBaseExt() || !has2DTextureExt());
 
-    GLubyte originalData[4] = {255, 0, 255, 255};
-    GLubyte updateData[4]   = {0, 255, 0, 255};
+    constexpr GLubyte kOriginalData[4] = {255, 0, 255, 255};
+    constexpr GLubyte kUpdateData[4]   = {0, 255, 0, 255};
 
     // Create the Image
     GLTexture source;
     EGLImageKHR image;
-    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, originalData,
+    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, kOriginalData,
                                   source, &image);
 
     // Create the target
@@ -8396,13 +8497,13 @@ TEST_P(ImageTest, Respecification)
 
     // Respecify source
     glBindTexture(GL_TEXTURE_2D, source);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, updateData);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, kUpdateData);
 
     // Expect that the target texture has the original data
-    verifyResults2D(target, originalData);
+    verifyResults2D(target, kOriginalData);
 
     // Expect that the source texture has the updated data
-    verifyResults2D(source, updateData);
+    verifyResults2D(source, kUpdateData);
 
     // Clean up
     eglDestroyImageKHR(window->getDisplay(), image);
@@ -8415,13 +8516,14 @@ TEST_P(ImageTest, RespecificationDifferentSize)
     EGLWindow *window = getEGLWindow();
     ANGLE_SKIP_TEST_IF(!hasOESExt() || !hasBaseExt() || !has2DTextureExt());
 
-    GLubyte originalData[4] = {255, 0, 255, 255};
-    GLubyte updateData[16]  = {0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255};
+    constexpr GLubyte kOriginalData[4] = {255, 0, 255, 255};
+    constexpr GLubyte kUpdateData[16]  = {0, 255, 0, 255, 0, 255, 0, 255,
+                                          0, 255, 0, 255, 0, 255, 0, 255};
 
     // Create the Image
     GLTexture source;
     EGLImageKHR image;
-    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, originalData,
+    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, kOriginalData,
                                   source, &image);
 
     // Create the target
@@ -8430,13 +8532,13 @@ TEST_P(ImageTest, RespecificationDifferentSize)
 
     // Respecify source
     glBindTexture(GL_TEXTURE_2D, source);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, updateData);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, kUpdateData);
 
     // Expect that the target texture has the original data
-    verifyResults2D(target, originalData);
+    verifyResults2D(target, kOriginalData);
 
     // Expect that the source texture has the updated data
-    verifyResults2D(source, updateData);
+    verifyResults2D(source, kUpdateData);
 
     // Clean up
     eglDestroyImageKHR(window->getDisplay(), image);
@@ -8451,13 +8553,13 @@ TEST_P(ImageTest, RespecificationWithFBO)
 
     ANGLE_GL_PROGRAM(program, essl1_shaders::vs::Simple(), essl1_shaders::fs::Blue());
 
-    GLubyte originalData[4] = {255, 0, 255, 255};
-    GLubyte updateData[4]   = {0, 255, 0, 255};
+    constexpr GLubyte kOriginalData[4] = {255, 0, 255, 255};
+    constexpr GLubyte kUpdateData[4]   = {0, 255, 0, 255};
 
     // Create the Image
     GLTexture source;
     EGLImageKHR image;
-    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, originalData,
+    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, kOriginalData,
                                   source, &image);
 
     // Create the target
@@ -8473,10 +8575,10 @@ TEST_P(ImageTest, RespecificationWithFBO)
 
     // Respecify source with same parameters. This should not change the texture storage in D3D11.
     glBindTexture(GL_TEXTURE_2D, source);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, updateData);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, kUpdateData);
 
     // Expect that the source texture has the updated data
-    verifyResults2D(source, updateData);
+    verifyResults2D(source, kUpdateData);
 
     // Render to the target texture again and verify it gets the rendered pixels.
     drawQuad(program, essl1_shaders::PositionAttrib(), 0.5f);
@@ -8501,18 +8603,18 @@ TEST_P(ImageTest, RespecificationOfOtherLevel)
     EGLWindow *window = getEGLWindow();
     ANGLE_SKIP_TEST_IF(!hasOESExt() || !hasBaseExt() || !has2DTextureExt());
 
-    GLubyte originalData[2 * 2 * 4] = {
+    constexpr GLubyte kOriginalData[2 * 2 * 4] = {
         255, 0, 255, 255, 255, 0, 255, 255, 255, 0, 255, 255, 255, 0, 255, 255,
     };
 
-    GLubyte updateData[2 * 2 * 4] = {
+    constexpr GLubyte kUpdateData[2 * 2 * 4] = {
         0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255,
     };
 
     // Create the Image
     GLTexture source;
     EGLImageKHR image;
-    createEGLImage2DTextureSource(2, 2, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, originalData,
+    createEGLImage2DTextureSource(2, 2, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, kOriginalData,
                                   source, &image);
 
     // Create the target
@@ -8520,25 +8622,25 @@ TEST_P(ImageTest, RespecificationOfOtherLevel)
     createEGLImageTargetTexture2D(image, target);
 
     // Expect that the target and source textures have the original data
-    verifyResults2D(source, originalData);
-    verifyResults2D(target, originalData);
+    verifyResults2D(source, kOriginalData);
+    verifyResults2D(target, kOriginalData);
 
     // Add a new mipLevel to the target, orphaning it
     glBindTexture(GL_TEXTURE_2D, target);
-    glTexImage2D(GL_TEXTURE_2D, 1, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, originalData);
+    glTexImage2D(GL_TEXTURE_2D, 1, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, kOriginalData);
     EXPECT_GL_NO_ERROR();
 
     // Expect that the target and source textures still have the original data
-    verifyResults2D(source, originalData);
-    verifyResults2D(target, originalData);
+    verifyResults2D(source, kOriginalData);
+    verifyResults2D(target, kOriginalData);
 
     // Update the source's data
     glBindTexture(GL_TEXTURE_2D, source);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 2, 2, GL_RGBA, GL_UNSIGNED_BYTE, updateData);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 2, 2, GL_RGBA, GL_UNSIGNED_BYTE, kUpdateData);
 
     // Expect that the target still has the original data and source has the updated data
-    verifyResults2D(source, updateData);
-    verifyResults2D(target, originalData);
+    verifyResults2D(source, kUpdateData);
+    verifyResults2D(target, kOriginalData);
 
     // Clean up
     eglDestroyImageKHR(window->getDisplay(), image);
@@ -8550,13 +8652,13 @@ TEST_P(ImageTest, UpdatedData)
     EGLWindow *window = getEGLWindow();
     ANGLE_SKIP_TEST_IF(!hasOESExt() || !hasBaseExt() || !has2DTextureExt());
 
-    GLubyte originalData[4] = {255, 0, 255, 255};
-    GLubyte updateData[4]   = {0, 255, 0, 255};
+    constexpr GLubyte kOriginalData[4] = {255, 0, 255, 255};
+    constexpr GLubyte kUpdateData[4]   = {0, 255, 0, 255};
 
     // Create the Image
     GLTexture source;
     EGLImageKHR image;
-    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, originalData,
+    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, kOriginalData,
                                   source, &image);
 
     // Create multiple targets
@@ -8567,27 +8669,27 @@ TEST_P(ImageTest, UpdatedData)
     createEGLImageTargetRenderbuffer(image, targetRenderbuffer);
 
     // Expect that both the source and targets have the original data
-    verifyResults2D(source, originalData);
-    verifyResults2D(targetTexture, originalData);
-    verifyResultsRenderbuffer(targetRenderbuffer, originalData);
+    verifyResults2D(source, kOriginalData);
+    verifyResults2D(targetTexture, kOriginalData);
+    verifyResultsRenderbuffer(targetRenderbuffer, kOriginalData);
 
     // Update the data of the source
     glBindTexture(GL_TEXTURE_2D, source);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, updateData);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kUpdateData);
 
     // Expect that both the source and targets have the updated data
-    verifyResults2D(source, updateData);
-    verifyResults2D(targetTexture, updateData);
-    verifyResultsRenderbuffer(targetRenderbuffer, updateData);
+    verifyResults2D(source, kUpdateData);
+    verifyResults2D(targetTexture, kUpdateData);
+    verifyResultsRenderbuffer(targetRenderbuffer, kUpdateData);
 
     // Update the data of the target back to the original data
     glBindTexture(GL_TEXTURE_2D, targetTexture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, originalData);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kOriginalData);
 
     // Expect that both the source and targets have the original data again
-    verifyResults2D(source, originalData);
-    verifyResults2D(targetTexture, originalData);
-    verifyResultsRenderbuffer(targetRenderbuffer, originalData);
+    verifyResults2D(source, kOriginalData);
+    verifyResults2D(targetTexture, kOriginalData);
+    verifyResultsRenderbuffer(targetRenderbuffer, kOriginalData);
 
     // Clean up
     eglDestroyImageKHR(window->getDisplay(), image);
@@ -8602,8 +8704,8 @@ TEST_P(ImageTest, AHBUpdatedExternalTexture)
     ANGLE_SKIP_TEST_IF(!hasAndroidImageNativeBufferExt() || !hasAndroidHardwareBufferSupport());
     ANGLE_SKIP_TEST_IF(!hasAhbLockPlanesSupport());
 
-    GLubyte originalData[4]      = {255, 0, 255, 255};
-    GLubyte updateData[4]        = {0, 255, 0, 255};
+    constexpr GLubyte kOriginalData[4] = {255, 0, 255, 255};
+    constexpr GLubyte kUpdateData[4]   = {0, 255, 0, 255};
     const uint32_t bytesPerPixel = 4;
 
     // Create the Image
@@ -8611,18 +8713,18 @@ TEST_P(ImageTest, AHBUpdatedExternalTexture)
     EGLImageKHR image;
     createEGLImageAndroidHardwareBufferSource(1, 1, 1, AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
                                               kDefaultAHBUsage, kDefaultAttribs,
-                                              {{originalData, bytesPerPixel}}, &source, &image);
+                                              {{kOriginalData, bytesPerPixel}}, &source, &image);
 
     // Create target
     GLTexture targetTexture;
     createEGLImageTargetTexture2D(image, targetTexture);
 
     // Expect that both the target have the original data
-    verifyResults2D(targetTexture, originalData);
+    verifyResults2D(targetTexture, kOriginalData);
 
     // Update the data of the source
     glBindTexture(GL_TEXTURE_2D, targetTexture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, updateData);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kUpdateData);
 
     // Set sync object and flush the GL commands
     EGLSyncKHR fence = eglCreateSyncKHR(window->getDisplay(), EGL_SYNC_FENCE_KHR, NULL);
@@ -8641,7 +8743,7 @@ TEST_P(ImageTest, AHBUpdatedExternalTexture)
     eglDestroyImageKHR(window->getDisplay(), image);
 
     // Access the android hardware buffer directly to check the data is updated
-    verifyResultAHB(source, {{updateData, bytesPerPixel}});
+    verifyResultAHB(source, {{kUpdateData, bytesPerPixel}});
 
     // Create the EGL image again
     image =
@@ -8654,7 +8756,7 @@ TEST_P(ImageTest, AHBUpdatedExternalTexture)
     createEGLImageTargetTexture2D(image, targetTexture2);
 
     // Expect that the target have the update data
-    verifyResults2D(targetTexture2, updateData);
+    verifyResults2D(targetTexture2, kUpdateData);
 
     // Clean up
     eglDestroyImageKHR(window->getDisplay(), image);
@@ -8686,8 +8788,8 @@ TEST_P(ImageTest, AHBUpdatedExternalTextureWithSharedContext)
     ASSERT_EGL_TRUE(eglMakeCurrent(display, pBufferSurface, pBufferSurface, pBufferContext));
     EXPECT_EGL_TRUE(eglMakeCurrent(display, surface, surface, context));
 
-    GLubyte originalData[4]      = {255, 0, 255, 255};
-    GLubyte updateData[4]        = {0, 255, 0, 255};
+    constexpr GLubyte kOriginalData[4] = {255, 0, 255, 255};
+    constexpr GLubyte kUpdateData[4]   = {0, 255, 0, 255};
     const uint32_t bytesPerPixel = 4;
     ASSERT_GL_NO_ERROR();
 
@@ -8696,7 +8798,7 @@ TEST_P(ImageTest, AHBUpdatedExternalTextureWithSharedContext)
     EGLImageKHR image;
     createEGLImageAndroidHardwareBufferSource(1, 1, 1, AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
                                               kDefaultAHBUsage, kDefaultAttribs,
-                                              {{originalData, bytesPerPixel}}, &source, &image);
+                                              {{kOriginalData, bytesPerPixel}}, &source, &image);
     ASSERT_GL_NO_ERROR();
 
     // Create target
@@ -8705,10 +8807,10 @@ TEST_P(ImageTest, AHBUpdatedExternalTextureWithSharedContext)
     ASSERT_GL_NO_ERROR();
 
     // Expect that both the target have the original data
-    verifyResults2D(targetTexture, originalData);
+    verifyResults2D(targetTexture, kOriginalData);
     // Update the data of the source
     glBindTexture(GL_TEXTURE_2D, targetTexture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, updateData);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kUpdateData);
 
     // Set sync object and flush the GL commands
     EGLSyncKHR fence = eglCreateSyncKHR(window->getDisplay(), EGL_SYNC_FENCE_KHR, nullptr);
@@ -8727,7 +8829,7 @@ TEST_P(ImageTest, AHBUpdatedExternalTextureWithSharedContext)
     eglDestroyImageKHR(window->getDisplay(), image);
 
     // Access the android hardware buffer directly to check the data is updated
-    verifyResultAHB(source, {{updateData, bytesPerPixel}});
+    verifyResultAHB(source, {{kUpdateData, bytesPerPixel}});
 
     // Create the EGL image again
     image =
@@ -8740,7 +8842,7 @@ TEST_P(ImageTest, AHBUpdatedExternalTextureWithSharedContext)
     createEGLImageTargetTexture2D(image, targetTexture2);
 
     // Expect that the target have the update data
-    verifyResults2D(targetTexture2, updateData);
+    verifyResults2D(targetTexture2, kUpdateData);
 
     // Clean up
     eglDestroyImageKHR(window->getDisplay(), image);
@@ -8759,7 +8861,7 @@ TEST_P(ImageTest, AHBUpdatedUnpackBuffer)
     ANGLE_SKIP_TEST_IF(!hasAndroidImageNativeBufferExt() || !hasAndroidHardwareBufferSupport());
     ANGLE_SKIP_TEST_IF(!hasAhbLockPlanesSupport());
 
-    GLubyte originalData[4 * 4] = {
+    constexpr GLubyte kOriginalData[4 * 4] = {
         0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF,
         0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF,
     };
@@ -8781,14 +8883,14 @@ TEST_P(ImageTest, AHBUpdatedUnpackBuffer)
     EGLImageKHR image;
     createEGLImageAndroidHardwareBufferSource(2, 2, 1, AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
                                               kDefaultAHBUsage, kDefaultAttribs,
-                                              {{originalData, bytesPerPixel}}, &source, &image);
+                                              {{kOriginalData, bytesPerPixel}}, &source, &image);
 
     // Create target
     GLTexture targetTexture;
     createEGLImageTargetTexture2D(image, targetTexture);
 
     // Expect that both the target have the original data
-    verifyResults2D(targetTexture, originalData);
+    verifyResults2D(targetTexture, kOriginalData);
 
     GLBuffer buf;
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buf);
@@ -8834,13 +8936,13 @@ TEST_P(ImageTest, DeletedImageWithSameSizeAndFormat)
 
     ANGLE_SKIP_TEST_IF(!hasOESExt() || !hasBaseExt() || !has2DTextureExt());
 
-    GLubyte originalData[4] = {255, 0, 255, 255};
-    GLubyte updateData[4]   = {0, 255, 0, 255};
+    constexpr GLubyte kOriginalData[4] = {255, 0, 255, 255};
+    constexpr GLubyte kUpdateData[4]   = {0, 255, 0, 255};
 
     // Create the Image
     GLTexture source;
     EGLImageKHR image;
-    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, originalData,
+    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, kOriginalData,
                                   source, &image);
 
     // Create texture & bind to Image
@@ -8853,7 +8955,7 @@ TEST_P(ImageTest, DeletedImageWithSameSizeAndFormat)
     ASSERT_EGL_SUCCESS();
 
     // Redefine Texture
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, updateData);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, kUpdateData);
 
     ASSERT_GL_NO_ERROR();
 }
@@ -10492,15 +10594,15 @@ TEST_P(ImageTest, RedefineWithMultipleImages)
 
     ANGLE_SKIP_TEST_IF(!hasOESExt() || !hasBaseExt() || !has2DTextureExt());
 
-    GLubyte originalData[4] = {255, 0, 255, 255};
-    GLubyte updateData[4]   = {0, 255, 0, 255};
+    constexpr GLubyte kOriginalData[4] = {255, 0, 255, 255};
+    constexpr GLubyte kUpdateData[4]   = {0, 255, 0, 255};
 
     // Create the Images
     GLTexture source1, source2;
     EGLImageKHR image1, image2;
-    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, originalData,
+    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, kOriginalData,
                                   source1, &image1);
-    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, originalData,
+    createEGLImage2DTextureSource(1, 1, GL_RGBA, GL_UNSIGNED_BYTE, kDefaultAttribs, kOriginalData,
                                   source2, &image2);
 
     // Create texture & bind to Image
@@ -10509,7 +10611,7 @@ TEST_P(ImageTest, RedefineWithMultipleImages)
 
     // Upload some data between the redefinition
     glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, updateData);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, kUpdateData);
 
     GLFramebuffer fbo;
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -11084,6 +11186,920 @@ TEST_P(ImageTest, BindExternalTextureAsImage_R16G16_UINT)
 
     eglDestroyImageKHR(window->getDisplay(), image);
     destroyAndroidHardwareBuffer(source);
+}
+
+void ImageTestES3::nonZeroLevelTest(
+    std::function<void(const GLTexture &, GLColor, uint32_t)> testTarget,
+    std::function<void(const GLTexture &, uint32_t, GLColor, uint32_t)> verifySourceAfterTest)
+{
+    EGLWindow *window = getEGLWindow();
+    ANGLE_SKIP_TEST_IF(!hasOESExt() || !hasBaseExt() || !has2DTextureExt());
+
+    constexpr uint32_t kBaseLevel   = 2;
+    constexpr uint32_t kMipLevels   = 7;
+    constexpr uint32_t kTextureSize = (1 << kMipLevels) - 1;
+    const std::vector<GLColor> initialColor(kTextureSize * kTextureSize, GLColor::magenta);
+    const std::vector<GLColor> initialOther(kTextureSize * kTextureSize, GLColor(10, 20, 30, 40));
+
+    constexpr uint32_t kExportLevel       = 5;
+    constexpr uint32_t kExportLevelOffset = kExportLevel - kBaseLevel;
+
+    GLTexture source;
+    glBindTexture(GL_TEXTURE_2D, source);
+
+    for (uint32_t level = 0; level < kMipLevels; level++)
+    {
+        glTexImage2D(GL_TEXTURE_2D, kBaseLevel + level, GL_RGBA8, kTextureSize >> level,
+                     kTextureSize >> level, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     level == kExportLevelOffset ? initialColor.data() : initialOther.data());
+    }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, kBaseLevel);
+
+    ASSERT_GL_NO_ERROR();
+
+    // Create the Image.  Note that the export level is not an _offset_ in the backing image but
+    // selects a level.  The offset would be this level minus the base level.
+    EGLint attribs[] = {
+        EGL_GL_TEXTURE_LEVEL_KHR,
+        kExportLevel,
+        EGL_NONE,
+    };
+    EGLImageKHR image =
+        eglCreateImageKHR(window->getDisplay(), window->getContext(), EGL_GL_TEXTURE_2D_KHR,
+                          reinterpretHelper<EGLClientBuffer>(source), attribs);
+    ASSERT_EGL_SUCCESS();
+
+    // Create a texture target
+    GLTexture target;
+    createEGLImageTargetTexture2D(image, target);
+
+    // Note: target is already bound to GL_TEXTURE_2D and source will be bound before the
+    // second callback, so the callbacks don't have to do that.
+    testTarget(target, initialColor[0], kTextureSize >> kExportLevelOffset);
+    glBindTexture(GL_TEXTURE_2D, source);
+    verifySourceAfterTest(source, kExportLevel, initialColor[0],
+                          kTextureSize >> kExportLevelOffset);
+
+    // Clean up
+    eglDestroyImageKHR(window->getDisplay(), image);
+    ASSERT_GL_NO_ERROR();
+}
+
+void ImageTestES3::nonZeroLevelAndSliceTest(
+    std::function<void(const GLTexture &, GLColor, uint32_t)> testTarget,
+    std::function<void(const GLTexture &, uint32_t, uint32_t, GLColor, uint32_t, uint32_t)>
+        verifySourceAfterTest)
+{
+    EGLWindow *window = getEGLWindow();
+    ANGLE_SKIP_TEST_IF(!hasOESExt() || !hasBaseExt() || !has3DTextureExt());
+
+    constexpr uint32_t kBaseLevel   = 2;
+    constexpr uint32_t kMipLevels   = 7;
+    constexpr uint32_t kDepth       = (1 << kMipLevels) - 51;
+    constexpr uint32_t kTextureSize = (1 << kMipLevels) - 1;
+    const std::vector<GLColor> initialColor(kTextureSize * kTextureSize, GLColor::magenta);
+    const std::vector<GLColor> initialOther(kTextureSize * kTextureSize * kDepth,
+                                            GLColor(100, 90, 80, 70));
+
+    constexpr uint32_t kExportLevel       = 5;
+    constexpr uint32_t kExportSlice       = 1;
+    constexpr uint32_t kExportLevelOffset = kExportLevel - kBaseLevel;
+
+    GLTexture source;
+    glBindTexture(GL_TEXTURE_3D, source);
+
+    for (uint32_t level = 0; level < kMipLevels; level++)
+    {
+        glTexImage3D(GL_TEXTURE_3D, kBaseLevel + level, GL_RGBA8, kTextureSize >> level,
+                     kTextureSize >> level, kDepth >> level, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     initialOther.data());
+    }
+    glTexSubImage3D(GL_TEXTURE_3D, kExportLevel, 0, 0, kExportSlice,
+                    kTextureSize >> kExportLevelOffset, kTextureSize >> kExportLevelOffset, 1,
+                    GL_RGBA, GL_UNSIGNED_BYTE, initialColor.data());
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_BASE_LEVEL, kBaseLevel);
+
+    ASSERT_GL_NO_ERROR();
+
+    // Create the Image.  Note that the export level is not an _offset_ in the backing image but
+    // selects a level.  The offset would be this level minus the base level.
+    EGLint attribs[] = {
+        EGL_GL_TEXTURE_LEVEL_KHR, kExportLevel, EGL_GL_TEXTURE_ZOFFSET_KHR, kExportSlice, EGL_NONE,
+    };
+    EGLImageKHR image =
+        eglCreateImageKHR(window->getDisplay(), window->getContext(), EGL_GL_TEXTURE_3D_KHR,
+                          reinterpretHelper<EGLClientBuffer>(source), attribs);
+    ASSERT_EGL_SUCCESS();
+
+    // Create a texture target
+    GLTexture target;
+    createEGLImageTargetTexture2D(image, target);
+
+    // Note: target is already bound to GL_TEXTURE_2D and source is already bound to
+    // GL_TEXTURE_3D, so the callbacks don't have to do that.
+    testTarget(target, initialColor[0], kTextureSize >> kExportLevelOffset);
+    verifySourceAfterTest(source, kExportLevel, kExportSlice, initialColor[0],
+                          kTextureSize >> kExportLevelOffset, kDepth >> kExportLevelOffset);
+
+    // Clean up
+    eglDestroyImageKHR(window->getDisplay(), image);
+    ASSERT_GL_NO_ERROR();
+}
+
+void ImageTestES3::nonZeroLevelAndFaceTest(
+    std::function<void(const GLTexture &, GLColor, uint32_t)> testTarget,
+    std::function<void(const GLTexture &, uint32_t, uint32_t, GLColor, uint32_t)>
+        verifySourceAfterTest)
+{
+    EGLWindow *window = getEGLWindow();
+    ANGLE_SKIP_TEST_IF(!hasOESExt() || !hasBaseExt() || !hasCubemapExt());
+
+    constexpr uint32_t kBaseLevel   = 2;
+    constexpr uint32_t kMipLevels   = 7;
+    constexpr uint32_t kTextureSize = (1 << kMipLevels) - 1;
+    const std::vector<GLColor> initialColor(kTextureSize * kTextureSize, GLColor::magenta);
+    const std::vector<GLColor> initialOther(kTextureSize * kTextureSize, GLColor(100, 90, 80, 70));
+
+    constexpr uint32_t kExportLevel       = 5;
+    constexpr uint32_t kExportFace        = 1;
+    constexpr uint32_t kExportLevelOffset = kExportLevel - kBaseLevel;
+
+    GLTexture source;
+    glBindTexture(GL_TEXTURE_CUBE_MAP, source);
+
+    for (uint32_t level = 0; level < kMipLevels; level++)
+    {
+        for (uint32_t face = 0; face < kCubeFaceCount; ++face)
+        {
+            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, kBaseLevel + level, GL_RGBA8,
+                         kTextureSize >> level, kTextureSize >> level, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                         level == kExportLevelOffset && face == kExportFace ? initialColor.data()
+                                                                            : initialOther.data());
+        }
+    }
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_BASE_LEVEL, kBaseLevel);
+
+    ASSERT_GL_NO_ERROR();
+
+    // Create the Image.  Note that the export level is not an _offset_ in the backing image but
+    // selects a level.  The offset would be this level minus the base level.
+    //
+    // The export layer is implicit in the face being exported.
+    EGLint attribs[] = {
+        EGL_GL_TEXTURE_LEVEL_KHR,
+        kExportLevel,
+        EGL_NONE,
+    };
+    EGLImageKHR image = eglCreateImageKHR(window->getDisplay(), window->getContext(),
+                                          EGL_GL_TEXTURE_CUBE_MAP_POSITIVE_X_KHR + kExportFace,
+                                          reinterpretHelper<EGLClientBuffer>(source), attribs);
+    ASSERT_EGL_SUCCESS();
+
+    // Create a texture target
+    GLTexture target;
+    createEGLImageTargetTexture2D(image, target);
+
+    // Note: target is already bound to GL_TEXTURE_2D and source is already bound to
+    // GL_TEXTURE_CUBE_MAP, so the callbacks don't have to do that.
+    testTarget(target, initialColor[0], kTextureSize >> kExportLevelOffset);
+    verifySourceAfterTest(source, kExportLevel, kExportFace, initialColor[0],
+                          kTextureSize >> kExportLevelOffset);
+
+    // Clean up
+    eglDestroyImageKHR(window->getDisplay(), image);
+    ASSERT_GL_NO_ERROR();
+}
+
+void ImageTestES3::nonZeroLevelRBTest(
+    std::function<void(const GLRenderbuffer &, GLColor, uint32_t)> testTarget,
+    std::function<void(const GLTexture &, uint32_t, GLColor, uint32_t)> verifySourceAfterTest)
+{
+    EGLWindow *window = getEGLWindow();
+    ANGLE_SKIP_TEST_IF(!hasOESExt() || !hasBaseExt() || !has2DTextureExt());
+
+    constexpr uint32_t kBaseLevel   = 3;
+    constexpr uint32_t kMipLevels   = 6;
+    constexpr uint32_t kTextureSize = (1 << kMipLevels) - 1;
+    const std::vector<GLColor> initialColor(kTextureSize * kTextureSize, GLColor::magenta);
+    const std::vector<GLColor> initialOther(kTextureSize * kTextureSize, GLColor(10, 20, 30, 40));
+
+    constexpr uint32_t kExportLevel       = 4;
+    constexpr uint32_t kExportLevelOffset = kExportLevel - kBaseLevel;
+
+    GLTexture source;
+    glBindTexture(GL_TEXTURE_2D, source);
+
+    for (uint32_t level = 0; level < kMipLevels; level++)
+    {
+        glTexImage2D(GL_TEXTURE_2D, kBaseLevel + level, GL_RGBA8, kTextureSize >> level,
+                     kTextureSize >> level, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     level == kExportLevelOffset ? initialColor.data() : initialOther.data());
+    }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, kBaseLevel);
+
+    ASSERT_GL_NO_ERROR();
+
+    // Create the Image.  Note that the export level is not an _offset_ in the backing image but
+    // selects a level.  The offset would be this level minus the base level.
+    EGLint attribs[] = {
+        EGL_GL_TEXTURE_LEVEL_KHR,
+        kExportLevel,
+        EGL_NONE,
+    };
+    EGLImageKHR image =
+        eglCreateImageKHR(window->getDisplay(), window->getContext(), EGL_GL_TEXTURE_2D_KHR,
+                          reinterpretHelper<EGLClientBuffer>(source), attribs);
+    ASSERT_EGL_SUCCESS();
+
+    // Create a renderbuffer target
+    GLRenderbuffer target;
+    createEGLImageTargetRenderbuffer(image, target);
+
+    // Note: renderbuffer is already bound to GL_RENDERBUFFER and source will be bound to
+    // GL_TEXTURE_2D before the second callback, so the callbacks don't have to do that.
+    testTarget(target, initialColor[0], kTextureSize >> kExportLevelOffset);
+    glBindTexture(GL_TEXTURE_2D, source);
+    verifySourceAfterTest(source, kExportLevel, initialColor[0],
+                          kTextureSize >> kExportLevelOffset);
+
+    // Clean up
+    eglDestroyImageKHR(window->getDisplay(), image);
+    ASSERT_GL_NO_ERROR();
+}
+
+void ImageTestES3::nonZeroLevelAndSliceRBTest(
+    std::function<void(const GLRenderbuffer &, GLColor, uint32_t)> testTarget,
+    std::function<void(const GLTexture &, uint32_t, uint32_t, GLColor, uint32_t, uint32_t)>
+        verifySourceAfterTest)
+{
+    EGLWindow *window = getEGLWindow();
+    ANGLE_SKIP_TEST_IF(!hasOESExt() || !hasBaseExt() || !has3DTextureExt());
+
+    constexpr uint32_t kBaseLevel   = 3;
+    constexpr uint32_t kMipLevels   = 6;
+    constexpr uint32_t kDepth       = (1 << kMipLevels) - 11;
+    constexpr uint32_t kTextureSize = (1 << kMipLevels) - 1;
+    const std::vector<GLColor> initialColor(kTextureSize * kTextureSize, GLColor::magenta);
+    const std::vector<GLColor> initialOther(kTextureSize * kTextureSize * kDepth,
+                                            GLColor(100, 90, 80, 70));
+
+    constexpr uint32_t kExportLevel       = 4;
+    constexpr uint32_t kExportSlice       = 2;
+    constexpr uint32_t kExportLevelOffset = kExportLevel - kBaseLevel;
+
+    GLTexture source;
+    glBindTexture(GL_TEXTURE_3D, source);
+
+    for (uint32_t level = 0; level < kMipLevels; level++)
+    {
+        glTexImage3D(GL_TEXTURE_3D, kBaseLevel + level, GL_RGBA8, kTextureSize >> level,
+                     kTextureSize >> level, kDepth >> level, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     initialOther.data());
+    }
+    glTexSubImage3D(GL_TEXTURE_3D, kExportLevel, 0, 0, kExportSlice,
+                    kTextureSize >> kExportLevelOffset, kTextureSize >> kExportLevelOffset, 1,
+                    GL_RGBA, GL_UNSIGNED_BYTE, initialColor.data());
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_BASE_LEVEL, kBaseLevel);
+
+    ASSERT_GL_NO_ERROR();
+
+    // Create the Image.  Note that the export level is not an _offset_ in the backing image but
+    // selects a level.  The offset would be this level minus the base level.
+    EGLint attribs[] = {
+        EGL_GL_TEXTURE_LEVEL_KHR, kExportLevel, EGL_GL_TEXTURE_ZOFFSET_KHR, kExportSlice, EGL_NONE,
+    };
+    EGLImageKHR image =
+        eglCreateImageKHR(window->getDisplay(), window->getContext(), EGL_GL_TEXTURE_3D_KHR,
+                          reinterpretHelper<EGLClientBuffer>(source), attribs);
+    ASSERT_EGL_SUCCESS();
+
+    // Create a renderbuffer target
+    GLRenderbuffer target;
+    createEGLImageTargetRenderbuffer(image, target);
+
+    // Note: target is already bound to GL_RENDERBUFFER and source is already bound to
+    // GL_TEXTURE_3D, so the callbacks don't have to do that.
+    testTarget(target, initialColor[0], kTextureSize >> kExportLevelOffset);
+    verifySourceAfterTest(source, kExportLevel, kExportSlice, initialColor[0],
+                          kTextureSize >> kExportLevelOffset, kDepth >> kExportLevelOffset);
+
+    // Clean up
+    eglDestroyImageKHR(window->getDisplay(), image);
+    ASSERT_GL_NO_ERROR();
+}
+
+void ImageTestES3::nonZeroLevelAndFaceRBTest(
+    std::function<void(const GLRenderbuffer &, GLColor, uint32_t)> testTarget,
+    std::function<void(const GLTexture &, uint32_t, uint32_t, GLColor, uint32_t)>
+        verifySourceAfterTest)
+{
+    EGLWindow *window = getEGLWindow();
+    ANGLE_SKIP_TEST_IF(!hasOESExt() || !hasBaseExt() || !hasCubemapExt());
+
+    constexpr uint32_t kBaseLevel   = 2;
+    constexpr uint32_t kMipLevels   = 7;
+    constexpr uint32_t kTextureSize = (1 << kMipLevels) - 1;
+    const std::vector<GLColor> initialColor(kTextureSize * kTextureSize, GLColor::magenta);
+    const std::vector<GLColor> initialOther(kTextureSize * kTextureSize, GLColor(100, 90, 80, 70));
+
+    constexpr uint32_t kExportLevel       = 3;
+    constexpr uint32_t kExportFace        = 4;
+    constexpr uint32_t kExportLevelOffset = kExportLevel - kBaseLevel;
+
+    GLTexture source;
+    glBindTexture(GL_TEXTURE_CUBE_MAP, source);
+
+    for (uint32_t level = 0; level < kMipLevels; level++)
+    {
+        for (uint32_t face = 0; face < kCubeFaceCount; ++face)
+        {
+            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, kBaseLevel + level, GL_RGBA8,
+                         kTextureSize >> level, kTextureSize >> level, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                         level == kExportLevelOffset && face == kExportFace ? initialColor.data()
+                                                                            : initialOther.data());
+        }
+    }
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_BASE_LEVEL, kBaseLevel);
+
+    ASSERT_GL_NO_ERROR();
+
+    // Create the Image.  Note that the export level is not an _offset_ in the backing image but
+    // selects a level.  The offset would be this level minus the base level.
+    //
+    // The export layer is implicit in the face being exported.
+    EGLint attribs[] = {
+        EGL_GL_TEXTURE_LEVEL_KHR,
+        kExportLevel,
+        EGL_NONE,
+    };
+    EGLImageKHR image = eglCreateImageKHR(window->getDisplay(), window->getContext(),
+                                          EGL_GL_TEXTURE_CUBE_MAP_POSITIVE_X_KHR + kExportFace,
+                                          reinterpretHelper<EGLClientBuffer>(source), attribs);
+    ASSERT_EGL_SUCCESS();
+
+    // Create a renderbuffer target
+    GLRenderbuffer target;
+    createEGLImageTargetRenderbuffer(image, target);
+
+    // Note: target is already bound to GL_RENDERBUFFER and source is already bound to
+    // GL_TEXTURE_CUBE_MAP, so the callbacks don't have to do that.
+    testTarget(target, initialColor[0], kTextureSize >> kExportLevelOffset);
+    verifySourceAfterTest(source, kExportLevel, kExportFace, initialColor[0],
+                          kTextureSize >> kExportLevelOffset);
+
+    // Clean up
+    eglDestroyImageKHR(window->getDisplay(), image);
+    ASSERT_GL_NO_ERROR();
+}
+// Export non-zero level, sample in texture
+TEST_P(ImageTestES3, NonZeroLevelSample)
+{
+    nonZeroLevelTest(
+        [this](const GLTexture &target, GLColor initColor, uint32_t size) {
+            // Verify the target
+            verifyResults2D(target, initColor.data());
+        },
+        [](const GLTexture &source, uint32_t level, GLColor initColor, uint32_t size) {});
+}
+
+// Export non-zero level and slice, sample in texture
+TEST_P(ImageTestES3, NonZeroLevelAndSliceSample)
+{
+    nonZeroLevelAndSliceTest(
+        [this](const GLTexture &target, GLColor initColor, uint32_t size) {
+            // Verify the target
+            verifyResults2D(target, initColor.data());
+        },
+        [](const GLTexture &source, uint32_t level, uint32_t slice, GLColor initColor,
+           uint32_t size, uint32_t depth) {});
+}
+
+// Export non-zero level and face, sample in texture
+TEST_P(ImageTestES3, NonZeroLevelAndFaceSample)
+{
+    nonZeroLevelAndFaceTest(
+        [this](const GLTexture &target, GLColor initColor, uint32_t size) {
+            // Verify the target
+            verifyResults2D(target, initColor.data());
+        },
+        [](const GLTexture &source, uint32_t level, uint32_t face, GLColor initColor,
+           uint32_t size) {});
+}
+
+// Export non-zero level, draw and readback
+TEST_P(ImageTestES3, NonZeroLevelDrawAndReadback)
+{
+    nonZeroLevelTest(
+        [this](const GLTexture &target, GLColor initColor, uint32_t size) {
+            // Draw into the texture, then read it back
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, target, 0);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+            EXPECT_PIXEL_RECT_EQ(0, 0, size, size, GLColor::red);
+        },
+        [this](const GLTexture &source, uint32_t level, GLColor initColor, uint32_t size) {
+            // Verify the draw is visible in source too
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, level);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, level);
+            verifyResults2D(source, GLColor::red.data());
+        });
+}
+
+// Export non-zero level and slice, draw and readback
+TEST_P(ImageTestES3, NonZeroLevelAndSliceDrawAndReadback)
+{
+    nonZeroLevelAndSliceTest(
+        [this](const GLTexture &target, GLColor initColor, uint32_t size) {
+            // Draw into the texture, then read it back
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, target, 0);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+            EXPECT_PIXEL_RECT_EQ(0, 0, size, size, GLColor::red);
+        },
+        [this](const GLTexture &source, uint32_t level, uint32_t slice, GLColor initColor,
+               uint32_t size, uint32_t depth) {
+            // Verify the draw is visible in source too
+            glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_BASE_LEVEL, level);
+            glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, level);
+            verifyResults3D(source, GLColor::red.data(), slice, depth);
+        });
+}
+
+// Export non-zero level and face, draw and readback
+TEST_P(ImageTestES3, NonZeroLevelAndFaceDrawAndReadback)
+{
+    nonZeroLevelAndFaceTest(
+        [this](const GLTexture &target, GLColor initColor, uint32_t size) {
+            // Draw into the texture, then read it back
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, target, 0);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+            EXPECT_PIXEL_RECT_EQ(0, 0, size, size, GLColor::red);
+        },
+        [this](const GLTexture &source, uint32_t level, uint32_t face, GLColor initColor,
+               uint32_t size) {
+            // Verify the draw is visible in source too
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_BASE_LEVEL, level);
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, level);
+            verifyResultsCube(source, GLColor::red.data(), face);
+        });
+}
+
+// Export non-zero level, draw and readback renderbuffer
+TEST_P(ImageTestES3, NonZeroLevelDrawAndReadbackRenderbuffer)
+{
+    nonZeroLevelRBTest(
+        [this](const GLRenderbuffer &target, GLColor initColor, uint32_t size) {
+            // Draw into the renderbuffer, then read it back
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+                                      target);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+            EXPECT_PIXEL_RECT_EQ(0, 0, size, size, GLColor::red);
+        },
+        [this](const GLTexture &source, uint32_t level, GLColor initColor, uint32_t size) {
+            // Verify the draw is visible in source too
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, level);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, level);
+            verifyResults2D(source, GLColor::red.data());
+        });
+}
+
+// Export non-zero level and slice, draw and readback renderbuffer
+TEST_P(ImageTestES3, NonZeroLevelAndSliceDrawAndReadbackRenderbuffer)
+{
+    nonZeroLevelAndSliceRBTest(
+        [this](const GLRenderbuffer &target, GLColor initColor, uint32_t size) {
+            // Draw into the renderbuffer, then read it back
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+                                      target);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+            EXPECT_PIXEL_RECT_EQ(0, 0, size, size, GLColor::red);
+        },
+        [this](const GLTexture &source, uint32_t level, uint32_t slice, GLColor initColor,
+               uint32_t size, uint32_t depth) {
+            // Verify the draw is visible in source too
+            glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_BASE_LEVEL, level);
+            glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, level);
+            verifyResults3D(source, GLColor::red.data(), slice, depth);
+        });
+}
+
+// Export non-zero level and face, draw and readback renderbuffer
+TEST_P(ImageTestES3, NonZeroLevelAndFaceDrawAndReadbackRenderbuffer)
+{
+    nonZeroLevelAndFaceRBTest(
+        [this](const GLRenderbuffer &target, GLColor initColor, uint32_t size) {
+            // Draw into the renderbuffer, then read it back
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+                                      target);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+            EXPECT_PIXEL_RECT_EQ(0, 0, size, size, GLColor::red);
+        },
+        [this](const GLTexture &source, uint32_t level, uint32_t face, GLColor initColor,
+               uint32_t size) {
+            // Verify the draw is visible in source too
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_BASE_LEVEL, level);
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, level);
+            verifyResultsCube(source, GLColor::red.data(), face);
+        });
+}
+
+// Export non-zero level, use as source of glCopyTexImage2D
+TEST_P(ImageTestES3, NonZeroLevelCopyTexImageSrc)
+{
+    nonZeroLevelTest(
+        [this](const GLTexture &target, GLColor initColor, uint32_t size) {
+            // Draw into the texture, then copy it into another texture
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, target, 0);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+
+            GLTexture copy;
+            glBindTexture(GL_TEXTURE_2D, copy);
+            glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 0, 0, size, size, 0);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+            ASSERT_GL_NO_ERROR();
+
+            // Verify the copy
+            verifyResults2D(copy, GLColor::red.data());
+        },
+        [this](const GLTexture &source, uint32_t level, GLColor initColor, uint32_t size) {
+            // Verify the draw is visible in source too
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, level);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, level);
+            verifyResults2D(source, GLColor::red.data());
+        });
+}
+
+// Export non-zero level and slice, use as source of glCopyTexImage2D
+TEST_P(ImageTestES3, NonZeroLevelAndSliceCopyTexImageSrc)
+{
+    nonZeroLevelAndSliceTest(
+        [this](const GLTexture &target, GLColor initColor, uint32_t size) {
+            // Draw into the texture, then copy it into another texture
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, target, 0);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+
+            GLTexture copy;
+            glBindTexture(GL_TEXTURE_2D, copy);
+            glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 0, 0, size, size, 0);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+            ASSERT_GL_NO_ERROR();
+
+            // Verify the copy
+            verifyResults2D(copy, GLColor::red.data());
+        },
+        [this](const GLTexture &source, uint32_t level, uint32_t slice, GLColor initColor,
+               uint32_t size, uint32_t depth) {
+            // Verify the draw is visible in source too
+            glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_BASE_LEVEL, level);
+            glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, level);
+            verifyResults3D(source, GLColor::red.data(), slice, depth);
+        });
+}
+
+// Export non-zero level and face, use as source of glCopyTexImage2D
+TEST_P(ImageTestES3, NonZeroLevelAndFaceCopyTexImageSrc)
+{
+    nonZeroLevelAndFaceTest(
+        [this](const GLTexture &target, GLColor initColor, uint32_t size) {
+            // Draw into the texture, then copy it into another texture
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, target, 0);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+
+            GLTexture copy;
+            glBindTexture(GL_TEXTURE_2D, copy);
+            glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 0, 0, size, size, 0);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+            ASSERT_GL_NO_ERROR();
+
+            // Verify the copy
+            verifyResults2D(copy, GLColor::red.data());
+        },
+        [this](const GLTexture &source, uint32_t level, uint32_t face, GLColor initColor,
+               uint32_t size) {
+            // Verify the draw is visible in source too
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_BASE_LEVEL, level);
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, level);
+            verifyResultsCube(source, GLColor::red.data(), face);
+        });
+}
+
+// Export non-zero level, use as source of glCopyTexImage2D, renderbuffer
+TEST_P(ImageTestES3, NonZeroLevelCopyTexImageSrcRenderbuffer)
+{
+    nonZeroLevelRBTest(
+        [this](const GLRenderbuffer &target, GLColor initColor, uint32_t size) {
+            // Draw into the texture, then copy it into another texture
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+                                      target);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+
+            GLTexture copy;
+            glBindTexture(GL_TEXTURE_2D, copy);
+            glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 0, 0, size, size, 0);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+            ASSERT_GL_NO_ERROR();
+
+            // Verify the copy
+            verifyResults2D(copy, GLColor::red.data());
+        },
+        [this](const GLTexture &source, uint32_t level, GLColor initColor, uint32_t size) {
+            // Verify the draw is visible in source too
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, level);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, level);
+            verifyResults2D(source, GLColor::red.data());
+        });
+}
+
+// Export non-zero level and slice, use as source of glCopyTexImage2D, renderbuffer
+TEST_P(ImageTestES3, NonZeroLevelAndSliceCopyTexImageSrcRenderbuffer)
+{
+    nonZeroLevelAndSliceRBTest(
+        [this](const GLRenderbuffer &target, GLColor initColor, uint32_t size) {
+            // Draw into the texture, then copy it into another texture
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+                                      target);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+
+            GLTexture copy;
+            glBindTexture(GL_TEXTURE_2D, copy);
+            glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 0, 0, size, size, 0);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+            ASSERT_GL_NO_ERROR();
+
+            // Verify the copy
+            verifyResults2D(copy, GLColor::red.data());
+        },
+        [this](const GLTexture &source, uint32_t level, uint32_t slice, GLColor initColor,
+               uint32_t size, uint32_t depth) {
+            // Verify the draw is visible in source too
+            glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_BASE_LEVEL, level);
+            glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, level);
+            verifyResults3D(source, GLColor::red.data(), slice, depth);
+        });
+}
+
+// Export non-zero level and face, use as source of glCopyTexImage2D, renderbuffer
+TEST_P(ImageTestES3, NonZeroLevelAndFaceCopyTexImageSrcRenderbuffer)
+{
+    nonZeroLevelAndFaceRBTest(
+        [this](const GLRenderbuffer &target, GLColor initColor, uint32_t size) {
+            // Draw into the texture, then copy it into another texture
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+                                      target);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+
+            GLTexture copy;
+            glBindTexture(GL_TEXTURE_2D, copy);
+            glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 0, 0, size, size, 0);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+            ASSERT_GL_NO_ERROR();
+
+            // Verify the copy
+            verifyResults2D(copy, GLColor::red.data());
+        },
+        [this](const GLTexture &source, uint32_t level, uint32_t face, GLColor initColor,
+               uint32_t size) {
+            // Verify the draw is visible in source too
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_BASE_LEVEL, level);
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, level);
+            verifyResultsCube(source, GLColor::red.data(), face);
+        });
+}
+
+// Export non-zero level, use as destination of glCopyTexSubImage2D
+TEST_P(ImageTestES3, NonZeroLevelCopyTexSubImageDst)
+{
+    nonZeroLevelTest(
+        [this](const GLTexture &target, GLColor initColor, uint32_t size) {
+            // Draw into the framebuffer, then copy it into the texture
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+            glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, size, size);
+            ASSERT_GL_NO_ERROR();
+
+            // Verify the copy
+            verifyResults2D(target, GLColor::red.data());
+        },
+        [this](const GLTexture &source, uint32_t level, GLColor initColor, uint32_t size) {
+            // Verify the copy is visible in source too
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, level);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, level);
+            verifyResults2D(source, GLColor::red.data());
+        });
+}
+
+// Export non-zero level and slice, use as destination of glCopyTexSubImage2D
+TEST_P(ImageTestES3, NonZeroLevelAndSliceCopyTexSubImageDst)
+{
+    nonZeroLevelAndSliceTest(
+        [this](const GLTexture &target, GLColor initColor, uint32_t size) {
+            // Draw into the framebuffer, then copy it into the texture
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+            glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, size, size);
+            ASSERT_GL_NO_ERROR();
+
+            verifyResults2D(target, GLColor::red.data());
+        },
+        [this](const GLTexture &source, uint32_t level, uint32_t slice, GLColor initColor,
+               uint32_t size, uint32_t depth) {
+            // Verify the copy is visible in source too
+            glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_BASE_LEVEL, level);
+            glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, level);
+            verifyResults3D(source, GLColor::red.data(), slice, depth);
+        });
+}
+
+// Export non-zero level and face, use as destination of glCopyTexSubImage2D
+TEST_P(ImageTestES3, NonZeroLevelAndFaceCopyTexSubImageDst)
+{
+    nonZeroLevelAndFaceTest(
+        [this](const GLTexture &target, GLColor initColor, uint32_t size) {
+            // Draw into the framebuffer, then copy it into the texture
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+            glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, size, size);
+            ASSERT_GL_NO_ERROR();
+
+            verifyResults2D(target, GLColor::red.data());
+        },
+        [this](const GLTexture &source, uint32_t level, uint32_t face, GLColor initColor,
+               uint32_t size) {
+            // Verify the copy is visible in source too
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_BASE_LEVEL, level);
+            glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, level);
+            verifyResultsCube(source, GLColor::red.data(), face);
+        });
+}
+
+// Export non-zero level, use as source and destination of glCopyTexImage2D
+TEST_P(ImageTestES3, NonZeroLevelCopyTexImageSrcDst)
+{
+    nonZeroLevelTest(
+        [this](const GLTexture &target, GLColor initColor, uint32_t size) {
+            // Draw into the left half of the texture, then copy that half into the same texture
+            // (orphaning it).
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, target, 0);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(0, 0, size / 2, size);
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+
+            glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 0, 0, size / 2, size, 0);
+            ASSERT_GL_NO_ERROR();
+
+            // Verify the copy
+            glDisable(GL_SCISSOR_TEST);
+            verifyResults2D(target, GLColor::red.data());
+        },
+        [](const GLTexture &source, uint32_t level, GLColor initColor, uint32_t size) {
+            // Verify the draw is visible in source too
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, source,
+                                   level);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            EXPECT_PIXEL_RECT_EQ(0, 0, size / 2, size, GLColor::red);
+            EXPECT_PIXEL_RECT_EQ(size / 2, 0, size - size / 2, size, initColor);
+        });
+}
+
+// Export non-zero level and slice, use as source and destination of glCopyTexImage2D
+TEST_P(ImageTestES3, NonZeroLevelAndSliceCopyTexImageSrcDst)
+{
+    nonZeroLevelAndSliceTest(
+        [this](const GLTexture &target, GLColor initColor, uint32_t size) {
+            // Draw into the left half of the texture, then copy that half into the same texture
+            // (orphaning it).
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, target, 0);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(0, 0, size / 2, size);
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+
+            glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 0, 0, size / 2, size, 0);
+            ASSERT_GL_NO_ERROR();
+
+            // Verify the copy
+            glDisable(GL_SCISSOR_TEST);
+            verifyResults2D(target, GLColor::red.data());
+        },
+        [](const GLTexture &source, uint32_t level, uint32_t slice, GLColor initColor,
+           uint32_t size, uint32_t depth) {
+            // Verify the draw is visible in source too
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, source, level, slice);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            EXPECT_PIXEL_RECT_EQ(0, 0, size / 2, size, GLColor::red);
+            EXPECT_PIXEL_RECT_EQ(size / 2, 0, size - size / 2, size, initColor);
+        });
+}
+
+// Export non-zero level and face, use as source and destination of glCopyTexImage2D
+TEST_P(ImageTestES3, NonZeroLevelAndFaceCopyTexImageSrcDst)
+{
+    nonZeroLevelAndFaceTest(
+        [this](const GLTexture &target, GLColor initColor, uint32_t size) {
+            // Draw into the left half of the texture, then copy that half into the same texture
+            // (orphaning it).
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, target, 0);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(0, 0, size / 2, size);
+            drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
+
+            glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 0, 0, size / 2, size, 0);
+            ASSERT_GL_NO_ERROR();
+
+            // Verify the copy
+            glDisable(GL_SCISSOR_TEST);
+            verifyResults2D(target, GLColor::red.data());
+        },
+        [](const GLTexture &source, uint32_t level, uint32_t face, GLColor initColor,
+           uint32_t size) {
+            // Verify the draw is visible in source too
+            GLFramebuffer fbo;
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                   GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, source, level);
+            ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+            EXPECT_PIXEL_RECT_EQ(0, 0, size / 2, size, GLColor::red);
+            EXPECT_PIXEL_RECT_EQ(size / 2, 0, size - size / 2, size, initColor);
+        });
 }
 
 ANGLE_INSTANTIATE_TEST_ES2_AND_ES3_AND(ImageTest,

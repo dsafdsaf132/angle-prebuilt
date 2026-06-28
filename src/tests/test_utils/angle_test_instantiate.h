@@ -10,11 +10,8 @@
 #ifndef ANGLE_TEST_INSTANTIATE_H_
 #define ANGLE_TEST_INSTANTIATE_H_
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #include <gtest/gtest.h>
+#include "common/unsafe_buffers.h"
 
 #include "common/platform_helpers.h"
 
@@ -70,9 +67,9 @@ std::vector<T> FilterTestParams(const T *params, size_t numParams)
 
     for (size_t i = 0; i < numParams; i++)
     {
-        if (IsPlatformAvailable(params[i]))
+        if (IsPlatformAvailable(ANGLE_UNSAFE_TODO(params[i])))
         {
-            filtered.push_back(params[i]);
+            filtered.push_back(ANGLE_UNSAFE_TODO(params[i]));
         }
     }
 
@@ -343,6 +340,16 @@ struct CombinedPrintToStringParamName
 // Variants of ANGLE_INSTANTIATE_TEST_COMBINE_N that take a variantName used as
 // the INSTANTIATE_TEST_SUITE_P prefix.  This allows the same test class to be
 // instantiated multiple times with different parameter combinations.
+#define ANGLE_INSTANTIATE_TEST_VARIANTS_COMBINE_7(variantName, testName, print, combine1,   \
+                                                  combine2, combine3, combine4, combine5,   \
+                                                  combine6, combine7, first, ...)           \
+    const std::remove_reference<decltype(first)>::type testName##variantName##params[] = {  \
+        first, ##__VA_ARGS__};                                                              \
+    INSTANTIATE_TEST_SUITE_P(                                                               \
+        variantName, testName,                                                              \
+        testing::Combine(ANGLE_INSTANTIATE_TEST_PLATFORMS(testName, variantName), combine1, \
+                         combine2, combine3, combine4, combine5, combine6, combine7),       \
+        print)
 #define ANGLE_INSTANTIATE_TEST_VARIANTS_COMBINE_9(                                             \
     variantName, testName, print, combine1, combine2, combine3, combine4, combine5, combine6,  \
     combine7, combine8, combine9, first, ...)                                                  \
@@ -409,7 +416,7 @@ std::vector<ParamT> CombineWithValues(const std::vector<ParamT> &in,
     std::vector<ParamT> out;
     for (const ParamT &paramsIn : in)
     {
-        for (auto iter = begin; iter != end; ++iter)
+        for (auto iter = begin; iter != end; ANGLE_UNSAFE_TODO(++iter))
         {
             out.push_back(combine(paramsIn, *iter));
         }
