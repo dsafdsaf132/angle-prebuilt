@@ -36,6 +36,12 @@ struct LinkedUniform;
 class Program;
 class Shader;
 
+enum class TexImageDimension
+{
+    _2D,
+    _3D,
+};
+
 #define ANGLE_VALIDATION_ERROR(errorCode, message) \
     context->getMutableErrorSetForValidation()->validationError(entryPoint, errorCode, message)
 #define ANGLE_VALIDATION_ERRORF(errorCode, ...)                                     \
@@ -631,14 +637,11 @@ ANGLE_INLINE bool ValidateColorMasksForSharedExponentColorBuffers(const BlendSta
 {
     // Get a mask of draw buffers that have color writemasks
     // incompatible with shared exponent color buffers.
-    // The compatible writemasks are RGBA, RGB0, 000A, 0000.
-    const BlendStateExt::ColorMaskStorage::Type rgbEnabledBits =
-        blendState.expandColorMaskValue(true, true, true, false);
-    const BlendStateExt::ColorMaskStorage::Type colorMaskNoAlphaBits =
-        blendState.getColorMaskBits() & rgbEnabledBits;
+    // The compatible writemasks are RGBA and 0000.
     const DrawBufferMask incompatibleDiffMask =
-        BlendStateExt::ColorMaskStorage::GetDiffMask(colorMaskNoAlphaBits, 0) &
-        BlendStateExt::ColorMaskStorage::GetDiffMask(colorMaskNoAlphaBits, rgbEnabledBits);
+        BlendStateExt::ColorMaskStorage::GetDiffMask(blendState.getColorMaskBits(), 0) &
+        BlendStateExt::ColorMaskStorage::GetDiffMask(blendState.getColorMaskBits(),
+                                                     blendState.getAllColorMaskBits());
 
     const DrawBufferMask sharedExponentBufferMask =
         framebuffer->getActiveSharedExponentColorAttachmentDrawBufferMask();
@@ -693,6 +696,16 @@ bool ValidateTransformFeedbackPrimitiveMode(const Context *context,
                                             angle::EntryPoint entryPoint,
                                             PrimitiveMode transformFeedbackPrimitiveMode,
                                             PrimitiveMode renderPrimitiveMode);
+
+bool ValidateTexStorage(const Context *context,
+                        angle::EntryPoint entryPoint,
+                        TextureType targetPacked,
+                        GLsizei levels,
+                        GLenum internalformat,
+                        GLsizei width,
+                        GLsizei height,
+                        GLsizei depth,
+                        TexImageDimension texImageDimension);
 
 // Common validation for 2D and 3D variants of TexStorage*Multisample.
 bool ValidateTexStorageMultisample(const Context *context,
@@ -768,30 +781,6 @@ bool ValidateES3CopyTexImage2DParameters(const Context *context,
                                          GLsizei width,
                                          GLsizei height,
                                          GLint border);
-bool ValidateES3TexStorageParametersBase(const Context *context,
-                                         angle::EntryPoint entryPoint,
-                                         TextureType target,
-                                         GLsizei levels,
-                                         GLenum internalformat,
-                                         GLsizei width,
-                                         GLsizei height,
-                                         GLsizei depth);
-bool ValidateES3TexStorage2DParameters(const Context *context,
-                                       angle::EntryPoint entryPoint,
-                                       TextureType target,
-                                       GLsizei levels,
-                                       GLenum internalformat,
-                                       GLsizei width,
-                                       GLsizei height,
-                                       GLsizei depth);
-bool ValidateES3TexStorage3DParameters(const Context *context,
-                                       angle::EntryPoint entryPoint,
-                                       TextureType target,
-                                       GLsizei levels,
-                                       GLenum internalformat,
-                                       GLsizei width,
-                                       GLsizei height,
-                                       GLsizei depth);
 
 bool ValidateGetMultisamplefvBase(const Context *context,
                                   angle::EntryPoint entryPoint,

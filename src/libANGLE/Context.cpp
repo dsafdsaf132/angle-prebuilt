@@ -2698,7 +2698,7 @@ void Context::getInteger64i_vRobust(GLenum target,
     const bool paramFound = getIndexedQueryParameterInfo(target, &nativeType, &numParams);
     ASSERT(paramFound);
 
-    if (nativeType == GL_INT_64_ANGLEX)
+    if (nativeType == GL_INT64)
     {
         mState.getInteger64i_v(target, index, data);
     }
@@ -3908,6 +3908,7 @@ Extensions Context::generateSupportedExtensions() const
         supportedExtensions.texture3DOES             = false;
         supportedExtensions.clipDistanceAPPLE        = false;
         supportedExtensions.disjointTimerQueryEXT    = false;
+        supportedExtensions.robustnessKHR            = false;
     }
 
     if (getClientVersion() < ES_3_0)
@@ -7011,15 +7012,6 @@ void Context::drawArraysInstancedBaseInstance(PrimitiveMode mode,
     MarkTransformFeedbackBufferUsage(this, count, 1);
 }
 
-void Context::drawArraysInstancedBaseInstanceANGLE(PrimitiveMode mode,
-                                                   GLint first,
-                                                   GLsizei count,
-                                                   GLsizei instanceCount,
-                                                   GLuint baseInstance)
-{
-    drawArraysInstancedBaseInstance(mode, first, count, instanceCount, baseInstance);
-}
-
 void Context::drawElementsInstancedBaseInstance(PrimitiveMode mode,
                                                 GLsizei count,
                                                 DrawElementsType type,
@@ -7065,18 +7057,6 @@ void Context::drawElementsInstancedBaseVertexBaseInstance(PrimitiveMode mode,
 
     ANGLE_CONTEXT_TRY(mImplementation->drawElementsInstancedBaseVertexBaseInstance(
         this, mode, count, type, indices, instanceCount, baseVertex, baseInstance));
-}
-
-void Context::drawElementsInstancedBaseVertexBaseInstanceANGLE(PrimitiveMode mode,
-                                                               GLsizei count,
-                                                               DrawElementsType type,
-                                                               const GLvoid *indices,
-                                                               GLsizei instanceCount,
-                                                               GLint baseVertex,
-                                                               GLuint baseInstance)
-{
-    drawElementsInstancedBaseVertexBaseInstance(mode, count, type, indices, instanceCount,
-                                                baseVertex, baseInstance);
 }
 
 void Context::multiDrawArraysInstancedBaseInstance(PrimitiveMode mode,
@@ -8192,7 +8172,7 @@ void Context::getInteger64vRobust(GLenum pname, GLsizei paramCount, GLsizei *len
         return;  // Avoid crashing with invalid apps running with no validation.
     }
 
-    if (nativeType == GL_INT_64_ANGLEX)
+    if (nativeType == GL_INT64)
     {
         getInteger64vImpl(pname, data);
     }
@@ -10144,7 +10124,7 @@ void Context::blobCacheCallbacks(GLSETBLOBPROCANGLE set,
     mState.getBlobCacheCallbacks() = {set, get, userParam};
 }
 
-void Context::texStorageAttribs2D(GLenum target,
+void Context::texStorageAttribs2D(TextureType targetPacked,
                                   GLsizei levels,
                                   GLenum internalFormat,
                                   GLsizei width,
@@ -10152,13 +10132,12 @@ void Context::texStorageAttribs2D(GLenum target,
                                   const GLint *attribList)
 {
     Extents size(width, height, 1);
-    TextureType textype = FromGLenum<TextureType>(target);
-    Texture *texture    = getTextureByType(textype);
+    Texture *texture = getTextureByType(targetPacked);
     ANGLE_CONTEXT_TRY(
-        texture->setStorageAttribs(this, textype, levels, internalFormat, size, attribList));
+        texture->setStorageAttribs(this, targetPacked, levels, internalFormat, size, attribList));
 }
 
-void Context::texStorageAttribs3D(GLenum target,
+void Context::texStorageAttribs3D(TextureType targetPacked,
                                   GLsizei levels,
                                   GLenum internalFormat,
                                   GLsizei width,
@@ -10167,10 +10146,9 @@ void Context::texStorageAttribs3D(GLenum target,
                                   const GLint *attribList)
 {
     Extents size(width, height, depth);
-    TextureType textype = FromGLenum<TextureType>(target);
-    Texture *texture    = getTextureByType(textype);
+    Texture *texture = getTextureByType(targetPacked);
     ANGLE_CONTEXT_TRY(
-        texture->setStorageAttribs(this, textype, levels, internalFormat, size, attribList));
+        texture->setStorageAttribs(this, targetPacked, levels, internalFormat, size, attribList));
 }
 
 size_t Context::getMemoryUsage() const

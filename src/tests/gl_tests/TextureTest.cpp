@@ -9670,8 +9670,6 @@ TEST_P(Texture2DTestES3, InternalFormatNotEnabled_ANGLEX)
     verify(GL_BGR565_ANGLEX, GL_RGB, GL_UNSIGNED_SHORT_5_6_5);
     verify(GL_BGRA4_ANGLEX, GL_BGRA_EXT, GL_UNSIGNED_SHORT_4_4_4_4_REV_EXT);
     verify(GL_BGR5_A1_ANGLEX, GL_BGRA_EXT, GL_UNSIGNED_SHORT_1_5_5_5_REV_EXT);
-    verify(GL_INT_64_ANGLEX, GL_RED, GL_INT);
-    verify(GL_UINT_64_ANGLEX, GL_RED, GL_UNSIGNED_INT);
     verify(GL_BGRA8_SRGB_ANGLEX, GL_BGRA_EXT, GL_UNSIGNED_BYTE);
     verify(GL_BGR10_A2_ANGLEX, GL_BGRA_EXT, GL_UNSIGNED_INT_2_10_10_10_REV);
     verify(GL_BGRX8_SRGB_ANGLEX, GL_BGRA_EXT, GL_UNSIGNED_BYTE);
@@ -9973,7 +9971,6 @@ TEST_P(Texture2DTest, TextureLuminanceAlphaRGBSame)
 TEST_P(Texture2DTest, TextureLuminance32ImplicitAlpha1)
 {
     ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_OES_texture_float"));
-    ANGLE_SKIP_TEST_IF(IsD3D9());
     ANGLE_SKIP_TEST_IF(IsVulkan());
 
     setUpProgram();
@@ -9993,7 +9990,6 @@ TEST_P(Texture2DTest, TextureLuminance32ImplicitAlpha1)
 TEST_P(Texture2DTest, TextureLuminance16ImplicitAlpha1)
 {
     ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_OES_texture_float"));
-    ANGLE_SKIP_TEST_IF(IsD3D9());
     ANGLE_SKIP_TEST_IF(IsVulkan());
     // TODO(ynovikov): re-enable once root cause of http://anglebug.com/42260416 is fixed
     ANGLE_SKIP_TEST_IF(IsAndroid() && IsAdreno() && IsOpenGLES());
@@ -11485,9 +11481,6 @@ TEST_P(TextureBorderClampTest, TextureBorderClampSrgb)
     ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_OES_texture_border_clamp"));
     ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_sRGB"));
 
-    // AMD D3D9 drivers always sample sRGB formats with (0, 0, 0, 0) border color, won't fix.
-    ANGLE_SKIP_TEST_IF(IsAMD() && IsD3D9());
-
     GLColor32F kBorder = {0.5f, 0.25f, 0.125f, 0.0625f};
 
     setUpProgram();
@@ -11608,9 +11601,6 @@ TEST_P(TextureBorderClampTest, TextureBorderClampDXT1Srgb)
 {
     ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_OES_texture_border_clamp"));
     ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_texture_compression_s3tc_srgb"));
-
-    // AMD D3D9 drivers always sample sRGB formats with (0, 0, 0, 0) border color, won't fix.
-    ANGLE_SKIP_TEST_IF(IsAMD() && IsD3D9());
 
     GLColor32F kBorder = {0.5f, 0.25f, 0.125f, 0.0625f};
 
@@ -13705,8 +13695,6 @@ TEST_P(Texture2DFloatTestES2, TextureHalfFloatLinearLegacyTest)
 // Test color-renderability for ES3 float and half float textures
 TEST_P(Texture2DFloatTestES3, TextureFloatRenderTest)
 {
-    // http://anglebug.com/40096654
-    ANGLE_SKIP_TEST_IF(IsD3D9());
     // EXT_color_buffer_float covers float, half float, and 11-11-10 float formats
     ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_color_buffer_float"));
 
@@ -13729,8 +13717,6 @@ TEST_P(Texture2DFloatTestES2, TextureFloatRenderTest)
     ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_color_buffer_half_float"));
     // https://crbug.com/1003971
     ANGLE_SKIP_TEST_IF(IsOzone());
-    // http://anglebug.com/40096654
-    ANGLE_SKIP_TEST_IF(IsD3D9());
 
     bool atLeastOneSupported = false;
 
@@ -14132,7 +14118,6 @@ class Texture2DDepthTest : public Texture2DTest
 TEST_P(Texture2DDepthTest, DepthTextureES2Compatibility)
 {
     ANGLE_SKIP_TEST_IF(IsD3D11());
-    ANGLE_SKIP_TEST_IF(IsIntel() && IsD3D9());
     ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_ANGLE_depth_texture") &&
                        !IsGLExtensionEnabled("GL_OES_depth_texture"));
     // http://anglebug.com/40096654
@@ -15371,11 +15356,11 @@ TEST_P(TextureCubeTestES32, MaxArrayTextureLayersVerify)
                  GL_UNSIGNED_BYTE, nullptr);
     EXPECT_GL_ERROR(GL_INVALID_VALUE);
 
-    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, kSize, kSize, maxTextureLayers);
-    ASSERT_GL_NO_ERROR();
-
     glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, kSize, kSize, maxTextureLayers + 1);
     EXPECT_GL_ERROR(GL_INVALID_VALUE);
+
+    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, kSize, kSize, maxTextureLayers);
+    ASSERT_GL_NO_ERROR();
 }
 
 // Tests defining a cube map array texture using glTexImage3D().

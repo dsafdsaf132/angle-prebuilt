@@ -220,9 +220,8 @@ bool ValidateColorMaskForSharedExponentColorBuffer(const Context *context,
     const FramebufferAttachment *attachment = state.getDrawFramebuffer()->getDrawBuffer(drawbuffer);
     if (attachment && attachment->getFormat().info->internalFormat == GL_RGB9_E5)
     {
-        bool r, g, b, a;
-        state.getBlendStateExt().getColorMaskIndexed(drawbuffer, &r, &g, &b, &a);
-        if (r != g || g != b)
+        const uint8_t mask = state.getBlendStateExt().getColorMaskIndexed(drawbuffer);
+        if (ANGLE_UNLIKELY(((mask + 1) & 0xE) != 0))  // Valid masks are 0 (none) and 15 (all).
         {
             ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION,
                                    kUnsupportedColorMaskForSharedExponentColorBuffer);
@@ -1420,102 +1419,6 @@ bool ValidateES3TexStorageParametersFormat(const Context *context,
     }
 
     return true;
-}
-
-bool ValidateES3TexStorageParametersBase(const Context *context,
-                                         angle::EntryPoint entryPoint,
-                                         TextureType target,
-                                         GLsizei levels,
-                                         GLenum internalformat,
-                                         GLsizei width,
-                                         GLsizei height,
-                                         GLsizei depth)
-{
-    if (width < 1 || height < 1 || depth < 1 || levels < 1)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_VALUE, kTextureSizeTooSmall);
-        return false;
-    }
-
-    if (!ValidateES3TexStorageParametersLevel(context, entryPoint, target, levels, width, height,
-                                              depth))
-    {
-        // Error already generated.
-        return false;
-    }
-
-    if (!ValidateES3TexStorageParametersExtent(context, entryPoint, target, levels, width, height,
-                                               depth))
-    {
-        // Error already generated.
-        return false;
-    }
-
-    if (!ValidateES3TexStorageParametersTexObject(context, entryPoint, target))
-    {
-        // Error already generated.
-        return false;
-    }
-
-    // Forbid use of ANGLE internal formats
-    if (IsAngleInternalFormat(internalformat))
-    {
-        ANGLE_VALIDATION_ERRORF(GL_INVALID_ENUM, kInvalidInternalFormat, internalformat);
-        return false;
-    }
-
-    if (!ValidateES3TexStorageParametersFormat(context, entryPoint, target, levels, internalformat,
-                                               width, height, depth))
-    {
-        // Error already generated.
-        return false;
-    }
-
-    if (!ValidImageAllocationSize(context, entryPoint, width, height, depth, 0, internalformat))
-    {
-        // Error already generated.
-        return false;
-    }
-
-    return true;
-}
-
-bool ValidateES3TexStorage2DParameters(const Context *context,
-                                       angle::EntryPoint entryPoint,
-                                       TextureType target,
-                                       GLsizei levels,
-                                       GLenum internalformat,
-                                       GLsizei width,
-                                       GLsizei height,
-                                       GLsizei depth)
-{
-    if (!ValidTexture2DTarget(context, target))
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_ENUM, kInvalidTextureTarget);
-        return false;
-    }
-
-    return ValidateES3TexStorageParametersBase(context, entryPoint, target, levels, internalformat,
-                                               width, height, depth);
-}
-
-bool ValidateES3TexStorage3DParameters(const Context *context,
-                                       angle::EntryPoint entryPoint,
-                                       TextureType target,
-                                       GLsizei levels,
-                                       GLenum internalformat,
-                                       GLsizei width,
-                                       GLsizei height,
-                                       GLsizei depth)
-{
-    if (!ValidTexture3DTarget(context, target))
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_ENUM, kInvalidTextureTarget);
-        return false;
-    }
-
-    return ValidateES3TexStorageParametersBase(context, entryPoint, target, levels, internalformat,
-                                               width, height, depth);
 }
 
 bool ValidateBeginQuery(const Context *context,
@@ -4347,41 +4250,6 @@ bool ValidateVertexAttribDivisor(const PrivateState &privateState,
                                  GLuint divisor)
 {
     return ValidateVertexAttribIndex(privateState, errors, entryPoint, index);
-}
-
-bool ValidateTexStorage2D(const Context *context,
-                          angle::EntryPoint entryPoint,
-                          TextureType target,
-                          GLsizei levels,
-                          GLenum internalformat,
-                          GLsizei width,
-                          GLsizei height)
-{
-    if (!ValidateES3TexStorage2DParameters(context, entryPoint, target, levels, internalformat,
-                                           width, height, 1))
-    {
-        return false;
-    }
-
-    return true;
-}
-
-bool ValidateTexStorage3D(const Context *context,
-                          angle::EntryPoint entryPoint,
-                          TextureType target,
-                          GLsizei levels,
-                          GLenum internalformat,
-                          GLsizei width,
-                          GLsizei height,
-                          GLsizei depth)
-{
-    if (!ValidateES3TexStorage3DParameters(context, entryPoint, target, levels, internalformat,
-                                           width, height, depth))
-    {
-        return false;
-    }
-
-    return true;
 }
 
 bool ValidateGetBufferParameteri64v(const Context *context,
