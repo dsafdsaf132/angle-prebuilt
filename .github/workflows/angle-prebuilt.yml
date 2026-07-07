@@ -40,6 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       should_build: ${{ steps.decide.outputs.should_build }}
+      build_ref: ${{ steps.decide.outputs.build_ref }}
     permissions:
       contents: read
     steps:
@@ -48,19 +49,37 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
+          INPUT_ANGLE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.angle_ref || '' }}
+          INPUT_ANGLE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.angle_commit || '' }}
           WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion || '' }}
-          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha || '' }}
+          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || 'main' }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           should_build=0
+          build_ref=""
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             should_build=1
+            build_ref="${INPUT_ANGLE_COMMIT:-$INPUT_ANGLE_REF}"
           elif [[ "$EVENT_NAME" == "workflow_run" && "$WORKFLOW_RUN_CONCLUSION" == "success" ]]; then
-            if [[ -z "$WORKFLOW_RUN_HEAD_SHA" ]]; then
-              echo "::error::workflow_run event did not include head_sha"
+            target_branch="${WORKFLOW_RUN_HEAD_BRANCH:-main}"
+            ref_json="$(
+              curl -fsSL \
+                --retry 5 \
+                --retry-delay 5 \
+                --retry-all-errors \
+                --connect-timeout 20 \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/heads/$target_branch"
+            )"
+            build_ref="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["object"]["sha"])' <<< "$ref_json")"
+            if [[ ! "$build_ref" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::Invalid branch HEAD SHA for $target_branch: $build_ref"
               exit 1
             fi
+            echo "Workflow run branch: $target_branch"
+            echo "Current branch HEAD: $build_ref"
             commit_json="$(
               curl -fsSL \
                 --retry 5 \
@@ -69,7 +88,7 @@ jobs:
                 --connect-timeout 20 \
                 -H "Authorization: Bearer $GH_TOKEN" \
                 -H "Accept: application/vnd.github+json" \
-                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$WORKFLOW_RUN_HEAD_SHA"
+                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$build_ref"
             )"
             message="$(
               python3 -c 'import json, sys; print(json.load(sys.stdin)["commit"]["message"])' \
@@ -101,6 +120,7 @@ jobs:
             fi
           fi
           echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
+          echo "build_ref=$build_ref" >> "$GITHUB_OUTPUT"
 
   build:
     name: ${{ matrix.target }}
@@ -151,7 +171,7 @@ jobs:
         with:
           fetch-depth: 0
           path: angle
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || (inputs.angle_commit != '' && inputs.angle_commit || inputs.angle_ref) }}
+          ref: ${{ needs.preflight.outputs.build_ref }}
 
       - name: Check out CI helpers
         uses: actions/checkout@v4
@@ -602,6 +622,7 @@ jobs:
   release:
     name: publish-release
     needs:
+      - preflight
       - build
       - macos_universal
     runs-on: ubuntu-latest
@@ -642,7 +663,7 @@ jobs:
           ARTIFACT_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.artifact_run_id != '' && inputs.artifact_run_id || '' }}
           EVENT_NAME: ${{ github.event_name }}
           INPUT_ANGLE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.angle_commit || '' }}
-          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha || '' }}
+          PREFLIGHT_BUILD_REF: ${{ needs.preflight.outputs.build_ref }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -661,7 +682,7 @@ jobs:
             )"
             target_sha="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["head_sha"])' <<< "$run_json")"
           elif [[ "$EVENT_NAME" == "workflow_run" ]]; then
-            target_sha="$WORKFLOW_RUN_HEAD_SHA"
+            target_sha="$PREFLIGHT_BUILD_REF"
           else
             target_sha="$GITHUB_SHA"
           fi
