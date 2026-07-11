@@ -4,10 +4,6 @@
 // found in the LICENSE file.
 //
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 // Note: During transition to IR, ParseContext.cpp builds the AST and IR at the same time, which is
 // not efficient.  The AST is used for validation purposes, but a stack that only contains the
 // necessary information needed for validation is sufficient, so for example operations such as
@@ -18,6 +14,7 @@
 // a fallback to AST maintained at the same time.
 
 #include "compiler/translator/ParseContext.h"
+#include "common/unsafe_buffers.h"
 #include "compiler/translator/Compiler.h"
 
 #include <stdarg.h>
@@ -58,14 +55,11 @@ constexpr size_t kWebGLMaxTotalPrivateVariableSizeInBytes = static_cast<size_t>(
 // The 1024 character identifier limit, `-2` for the `_u`
 constexpr size_t kMaxAvailableIdentifierLength = 1022;
 
-bool ShouldEnforceESSL100LoopAndIndexingLimitations(ShShaderSpec spec,
-                                                    int shaderVersion,
-                                                    const ShCompileOptions &compileOptions)
+bool ShouldEnforceESSL100LoopAndIndexingLimitations(ShShaderSpec spec, int shaderVersion)
 {
-    // If compiling an ESSL 1.00 shader for WebGL, or if its been requested through the API,
-    // validate loop and indexing as well (to verify that the shader only uses minimal functionality
-    // of ESSL 1.00 as in Appendix A of the spec).
-    return (IsWebGLBasedSpec(spec) && shaderVersion == 100) || compileOptions.validateLoopIndexing;
+    // If compiling an ESSL 1.00 shader for WebGL, validate loop and indexing as well (to verify
+    // that the shader only uses minimal functionality of ESSL 1.00 as in Appendix A of the spec).
+    return IsWebGLBasedSpec(spec) && shaderVersion == 100;
 }
 
 struct IsSamplerFunc
@@ -549,7 +543,7 @@ TParseContext::TParseContext(TSymbolTable &symt,
       mMainFunction(nullptr),
       mIsReturnVisitedInMain(false),
       mValidateESSL100Limitations(
-          ShouldEnforceESSL100LoopAndIndexingLimitations(spec, mShaderVersion, options)),
+          ShouldEnforceESSL100LoopAndIndexingLimitations(spec, mShaderVersion)),
       mFragmentOutputIndex1Used(false),
       mFragmentOutputFragDepthUsed(false),
       mMaxFragDataArrayIndexUsed(0),
@@ -600,8 +594,8 @@ void TParseContext::onShaderVersionDeclared(const TSourceLoc &loc, int version)
     mShaderVersion = version;
     checkShaderVersion(loc);
     // Update cached decisions that depend on the shader version
-    mValidateESSL100Limitations = ShouldEnforceESSL100LoopAndIndexingLimitations(
-        mShaderSpec, mShaderVersion, mCompileOptions);
+    mValidateESSL100Limitations =
+        ShouldEnforceESSL100LoopAndIndexingLimitations(mShaderSpec, mShaderVersion);
 }
 
 void TParseContext::fatal(const TSourceLoc &loc, const char *reason)
@@ -723,53 +717,77 @@ bool TParseContext::parseVectorFields(const TSourceLoc &line,
         switch (compString[i])
         {
             case 'x':
-                (*fieldOffsets)[i] = 0;
-                fieldSet[i]        = exyzw;
+                ANGLE_UNSAFE_TODO({
+                    (*fieldOffsets)[i] = 0;
+                    fieldSet[i]        = exyzw;
+                })
                 break;
             case 'r':
-                (*fieldOffsets)[i] = 0;
-                fieldSet[i]        = ergba;
+                ANGLE_UNSAFE_TODO({
+                    (*fieldOffsets)[i] = 0;
+                    fieldSet[i]        = ergba;
+                })
                 break;
             case 's':
-                (*fieldOffsets)[i] = 0;
-                fieldSet[i]        = estpq;
+                ANGLE_UNSAFE_TODO({
+                    (*fieldOffsets)[i] = 0;
+                    fieldSet[i]        = estpq;
+                })
                 break;
             case 'y':
-                (*fieldOffsets)[i] = 1;
-                fieldSet[i]        = exyzw;
+                ANGLE_UNSAFE_TODO({
+                    (*fieldOffsets)[i] = 1;
+                    fieldSet[i]        = exyzw;
+                })
                 break;
             case 'g':
-                (*fieldOffsets)[i] = 1;
-                fieldSet[i]        = ergba;
+                ANGLE_UNSAFE_TODO({
+                    (*fieldOffsets)[i] = 1;
+                    fieldSet[i]        = ergba;
+                })
                 break;
             case 't':
-                (*fieldOffsets)[i] = 1;
-                fieldSet[i]        = estpq;
+                ANGLE_UNSAFE_TODO({
+                    (*fieldOffsets)[i] = 1;
+                    fieldSet[i]        = estpq;
+                })
                 break;
             case 'z':
-                (*fieldOffsets)[i] = 2;
-                fieldSet[i]        = exyzw;
+                ANGLE_UNSAFE_TODO({
+                    (*fieldOffsets)[i] = 2;
+                    fieldSet[i]        = exyzw;
+                })
                 break;
             case 'b':
-                (*fieldOffsets)[i] = 2;
-                fieldSet[i]        = ergba;
+                ANGLE_UNSAFE_TODO({
+                    (*fieldOffsets)[i] = 2;
+                    fieldSet[i]        = ergba;
+                })
                 break;
             case 'p':
-                (*fieldOffsets)[i] = 2;
-                fieldSet[i]        = estpq;
+                ANGLE_UNSAFE_TODO({
+                    (*fieldOffsets)[i] = 2;
+                    fieldSet[i]        = estpq;
+                })
                 break;
 
             case 'w':
-                (*fieldOffsets)[i] = 3;
-                fieldSet[i]        = exyzw;
+                ANGLE_UNSAFE_TODO({
+                    (*fieldOffsets)[i] = 3;
+                    fieldSet[i]        = exyzw;
+                })
                 break;
             case 'a':
-                (*fieldOffsets)[i] = 3;
-                fieldSet[i]        = ergba;
+                ANGLE_UNSAFE_TODO({
+                    (*fieldOffsets)[i] = 3;
+                    fieldSet[i]        = ergba;
+                })
                 break;
             case 'q':
-                (*fieldOffsets)[i] = 3;
-                fieldSet[i]        = estpq;
+                ANGLE_UNSAFE_TODO({
+                    (*fieldOffsets)[i] = 3;
+                    fieldSet[i]        = estpq;
+                })
                 break;
             default:
                 error(line, "illegal vector field selection", compString);
@@ -787,7 +805,7 @@ bool TParseContext::parseVectorFields(const TSourceLoc &line,
 
         if (i > 0)
         {
-            if (fieldSet[i] != fieldSet[i - 1])
+            if (ANGLE_UNSAFE_TODO(fieldSet[i] != fieldSet[i - 1]))
             {
                 error(line, "illegal - vector component fields not from the same set", compString);
                 return false;
@@ -3456,10 +3474,10 @@ void TParseContext::declareFunction(const TFunction *function, FunctionDeclarati
             paramDirections.push_back(paramType.getQualifier());
         }
 
-        mFunctionToId[function] =
-            mIRBuilder.newFunction(function->name(), angle::Span(params.data(), params.size()),
-                                   angle::Span(paramDirections.data(), paramDirections.size()),
-                                   getTypeId(function->getReturnType()), function->getReturnType());
+        mFunctionToId[function] = ANGLE_UNSAFE_TODO(mIRBuilder.newFunction(
+            function->name(), angle::Span(params.data(), params.size()),
+            angle::Span(paramDirections.data(), paramDirections.size()),
+            getTypeId(function->getReturnType()), function->getReturnType()));
     }
     else if (declaration == FunctionDeclaration::Definition)
     {
@@ -3470,9 +3488,9 @@ void TParseContext::declareFunction(const TFunction *function, FunctionDeclarati
             const TVariable *param = function->getParam(i);
             paramNames.push_back(param->name());
         }
-        mIRBuilder.updateFunctionParamNames(mFunctionToId[function],
-                                            angle::Span(paramNames.data(), paramNames.size()),
-                                            angle::Span(paramIds.data(), paramIds.size()));
+        ANGLE_UNSAFE_TODO(mIRBuilder.updateFunctionParamNames(
+            mFunctionToId[function], angle::Span(paramNames.data(), paramNames.size()),
+            angle::Span(paramIds.data(), paramIds.size())));
 
         // When a prototype is previously visited, `declareFunction` has already created the
         // variables for the function parameters in the |if| above.  When the function prototype is
@@ -3518,7 +3536,7 @@ TIntermTyped *TParseContext::parseVariableIdentifier(const TSourceLoc &location,
         TConstantUnion *constArray      = new TConstantUnion[3];
         for (size_t i = 0; i < 3; ++i)
         {
-            constArray[i].setUConst(static_cast<unsigned int>(workGroupSize[i]));
+            ANGLE_UNSAFE_TODO(constArray[i]).setUConst(static_cast<unsigned int>(workGroupSize[i]));
         }
 
         ASSERT(variableType.getBasicType() == EbtUInt);
@@ -5800,7 +5818,8 @@ void TParseContext::parseGlobalLayoutQualifier(const TTypeQualifierBuilder &type
             if (layoutQualifier.localSize[i] != -1)
             {
                 mComputeShaderLocalSize[i]             = layoutQualifier.localSize[i];
-                const int maxComputeWorkGroupSizeValue = maxComputeWorkGroupSizeData[i].getIConst();
+                const int maxComputeWorkGroupSizeValue =
+                    ANGLE_UNSAFE_TODO(maxComputeWorkGroupSizeData[i]).getIConst();
                 if (mComputeShaderLocalSize[i] < 1 ||
                     mComputeShaderLocalSize[i] > maxComputeWorkGroupSizeValue)
                 {
@@ -7389,7 +7408,8 @@ TIntermTyped *TParseContext::addFieldSelectionExpression(TIntermTyped *baseExpre
         }
         else
         {
-            mIRBuilder.vectorComponentMulti(angle::Span(fieldOffsets.data(), fieldOffsets.size()));
+            ANGLE_UNSAFE_TODO(mIRBuilder.vectorComponentMulti(
+                angle::Span(fieldOffsets.data(), fieldOffsets.size())));
         }
 
         TIntermSwizzle *node = new TIntermSwizzle(baseExpression, fieldOffsets);
@@ -8512,8 +8532,9 @@ TTypeSpecifierNonArray TParseContext::addStructure(const TSourceLoc &structLine,
 
     mSymbolToTypeId[structure] = mIRBuilder.getStructTypeId(
         structure->symbolType() == SymbolType::Empty ? kEmptyImmutableString : structure->name(),
-        angle::Span<const TField *const>(reorderedFields->data(), reorderedFields->size()), {},
-        false, false, symbolTable.atGlobalLevel());
+        ANGLE_UNSAFE_TODO(
+            angle::Span<const TField *const>(reorderedFields->data(), reorderedFields->size())),
+        {}, false, false, symbolTable.atGlobalLevel());
 
     TTypeSpecifierNonArray typeSpecifierNonArray;
     typeSpecifierNonArray.initializeStruct(structure, true, structLine);
@@ -9555,8 +9576,8 @@ void TParseContext::checkTextureOffset(TIntermAggregate *functionCall)
         size_t size = offsetType.getObjectSize() / kOffsetsCount;
         for (unsigned int i = 0; i < kOffsetsCount; ++i)
         {
-            checkSingleTextureOffset(offset->getLine(), &offsetValues[i * size], size,
-                                     minOffsetValue, maxOffsetValue);
+            ANGLE_UNSAFE_TODO(checkSingleTextureOffset(offset->getLine(), &offsetValues[i * size],
+                                                       size, minOffsetValue, maxOffsetValue));
         }
     }
     else
@@ -9603,8 +9624,8 @@ void TParseContext::checkSingleTextureOffset(const TSourceLoc &line,
 {
     for (size_t i = 0u; i < size; ++i)
     {
-        ASSERT(values[i].getType() == EbtInt);
-        int offsetValue = values[i].getIConst();
+        ANGLE_UNSAFE_TODO(ASSERT(values[i].getType() == EbtInt));
+        int offsetValue = ANGLE_UNSAFE_TODO(values[i].getIConst());
         if (offsetValue > maxOffsetValue || offsetValue < minOffsetValue)
         {
             std::stringstream tokenStream = sh::InitializeStream<std::stringstream>();
@@ -10109,11 +10130,11 @@ ir::TypeId TParseContext::getTypeId(const TType &type)
 
             // Same issue with built-ins where the type id is not baked in.  So the type id of each
             // field is also calculated here and passed in.
-            id = mIRBuilder.getStructTypeId(
+            id                     = ANGLE_UNSAFE_TODO(mIRBuilder.getStructTypeId(
                 block->symbolType() == SymbolType::Empty ? kEmptyImmutableString : block->name(),
                 angle::Span<const TField *const>(fields->data(), fields->size()),
                 angle::Span<ir::TypeId>(fieldTypeIds.data(), fieldTypeIds.size()),
-                block->isInterfaceBlock(), block->symbolType() == SymbolType::BuiltIn, true);
+                block->isInterfaceBlock(), block->symbolType() == SymbolType::BuiltIn, true));
             mSymbolToTypeId[block] = id;
         }
     }
@@ -10178,7 +10199,7 @@ const TConstantUnion *TParseContext::pushConstant(const TConstantUnion *constant
     else
     {
         size_t size = type.getObjectSize();
-        for (size_t i = 0; i < size; ++i, ++constant)
+        for (size_t i = 0; i < size; ++i, ANGLE_UNSAFE_TODO(++constant))
         {
             switch (constant->getType())
             {

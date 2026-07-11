@@ -222,7 +222,6 @@ declare_args() {
   # True if we are building inside an ANGLE checkout.
   angle_standalone = !build_with_chromium
 
-  angle_enable_d3d9 = is_win && !angle_is_winuwp
   angle_enable_d3d11 = is_win
   angle_enable_gl =
       (ozone_platform_drm || ozone_platform_wayland || !is_linux ||
@@ -250,12 +249,21 @@ declare_args() {
   angle_enable_cl_passthrough = angle_enable_cl
 
   # Disable WGPU backend. Currently disabled on Android, Fuchsia, WinUWP, and
-  # Win MSVC. X11 required on Linux.
+  # Win MSVC. X11 or Wayland required on Linux.
   # anglebug.com/42266968
   angle_enable_wgpu =
       !is_official_build && !(is_android || is_fuchsia || angle_is_winuwp) &&
-      (!is_win || is_clang) && (!is_linux || angle_use_x11) &&
+      (!is_win || is_clang) &&
+      (!is_linux || angle_use_x11 || angle_use_wayland) &&
       defined(angle_dawn_dir) && checkout_angle_dawn_deps
+}
+
+declare_args() {
+  # Enable the ANGLE_explicit_context extension. This duplicates all GL entry
+  # points which increases binary size.
+  # Currently enabled only when the WebGPU backend is enabled because only the
+  # WebGPU backend currently supports this extension.
+  angle_enable_explicit_context = angle_enable_wgpu
 }
 
 declare_args() {
@@ -333,7 +341,7 @@ declare_args() {
   angle_enable_swiftshader = angle_enable_vulkan && !is_android && is_clang
 
   # Translator backend support:
-  angle_enable_hlsl = angle_enable_d3d9 || angle_enable_d3d11
+  angle_enable_hlsl = angle_enable_d3d11
   angle_enable_essl = angle_enable_gl || use_ozone
   angle_enable_glsl = angle_enable_gl || use_ozone
   angle_enable_msl = angle_enable_metal

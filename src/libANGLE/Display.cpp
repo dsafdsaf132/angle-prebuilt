@@ -8,11 +8,8 @@
 // display on which graphics are drawn. Implements EGLDisplay.
 // [EGL 1.4] section 2.1.2 page 3.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #include "libANGLE/Display.h"
+#include "common/unsafe_buffers.h"
 
 #include <algorithm>
 #include <iterator>
@@ -55,7 +52,7 @@
 #    include "common/tls.h"
 #endif
 
-#if defined(ANGLE_ENABLE_D3D9) || defined(ANGLE_ENABLE_D3D11)
+#if defined(ANGLE_ENABLE_D3D11)
 #    include "libANGLE/renderer/d3d/DisplayD3D.h"
 #endif
 
@@ -163,7 +160,7 @@ size_t EGLStringArrayHash(const char **ary)
     size_t hash = 0;
     if (ary != nullptr)
     {
-        for (; *ary != nullptr; ary++)
+        for (; *ary != nullptr; ANGLE_UNSAFE_TODO(ary++))
         {
             hash ^= std::hash<std::string>{}(std::string(*ary));
         }
@@ -273,19 +270,6 @@ rx::DisplayImpl *CreateDisplayFromDevice(Device *eglDevice, const DisplayState &
     }
 #endif
 
-#if defined(ANGLE_ENABLE_D3D9)
-    if (eglDevice->getExtensions().deviceD3D9)
-    {
-        // Currently the only way to get EGLDeviceEXT representing a D3D9 device
-        // is to retrieve one from an already-existing EGLDisplay.
-        // When eglGetPlatformDisplayEXT is called with a D3D9 EGLDeviceEXT,
-        // the already-existing display should be returned.
-        // Therefore this codepath to create a new display from the device
-        // should never be hit.
-        UNREACHABLE();
-    }
-#endif
-
     ASSERT(impl != nullptr);
     return impl;
 }
@@ -343,8 +327,6 @@ EGLAttrib GetDisplayTypeFromEnvironment()
 #endif
 #if defined(ANGLE_ENABLE_D3D11)
     return EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE;
-#elif defined(ANGLE_ENABLE_D3D9)
-    return EGL_PLATFORM_ANGLE_TYPE_D3D9_ANGLE;
 #elif defined(ANGLE_ENABLE_VULKAN) && defined(ANGLE_PLATFORM_ANDROID)
     return EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE;
 #elif defined(ANGLE_ENABLE_OPENGL)
@@ -430,9 +412,8 @@ rx::DisplayImpl *CreateDisplayFromAttribs(EGLAttrib displayType,
             UNREACHABLE();
             break;
 
-        case EGL_PLATFORM_ANGLE_TYPE_D3D9_ANGLE:
         case EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE:
-#if defined(ANGLE_ENABLE_D3D9) || defined(ANGLE_ENABLE_D3D11)
+#if defined(ANGLE_ENABLE_D3D11)
             impl = new rx::DisplayD3D(state);
             break;
 #else
@@ -707,7 +688,7 @@ const std::vector<std::string> EGLStringArrayToStringVector(const char **ary)
     std::vector<std::string> vec;
     if (ary != nullptr)
     {
-        for (; *ary != nullptr; ary++)
+        for (; *ary != nullptr; ANGLE_UNSAFE_TODO(ary++))
         {
             vec.push_back(std::string(*ary));
         }
@@ -2209,7 +2190,7 @@ static ClientExtensions GenerateClientExtensions()
     extensions.platformBase     = true;
     extensions.platformANGLE    = true;
 
-#if defined(ANGLE_ENABLE_D3D9) || defined(ANGLE_ENABLE_D3D11)
+#if defined(ANGLE_ENABLE_D3D11)
     extensions.platformANGLED3D = true;
     extensions.platformDevice   = true;
 #endif
@@ -2346,8 +2327,9 @@ void Display::initDisplayExtensions()
     // say that ANativeWindow is not recordable.
     mDisplayExtensions.recordable = true;
 
-    // All backends support specific context versions
-    mDisplayExtensions.createContextBackwardsCompatible = true;
+    // EGL_ANGLE_create_context_backwards_compatible
+    mDisplayExtensions.createContextBackwardsCompatible =
+        mFrontendFeatures.enableCreateContextBackwardsCompatible.enabled;
 
     // EGL_ANGLE_memory_usage_report is implemented on front end.
     mDisplayExtensions.memoryUsageReportANGLE = true;
@@ -2421,8 +2403,7 @@ bool Display::isValidNativeDisplay(EGLNativeDisplayType display)
     }
 
 #if defined(ANGLE_PLATFORM_WINDOWS) && !defined(ANGLE_ENABLE_WINDOWS_UWP)
-    if (display == EGL_SOFTWARE_DISPLAY_ANGLE || display == EGL_D3D11_ELSE_D3D9_DISPLAY_ANGLE ||
-        display == EGL_D3D11_ONLY_DISPLAY_ANGLE)
+    if (display == EGL_SOFTWARE_DISPLAY_ANGLE || display == EGL_D3D11_ONLY_DISPLAY_ANGLE)
     {
         return true;
     }
@@ -2457,6 +2438,11 @@ void Display::initializeFrontendFeatures()
     // Enable on all Impls
     ANGLE_FEATURE_CONDITION(&mFrontendFeatures, loseContextOnOutOfMemory, true);
     ANGLE_FEATURE_CONDITION(&mFrontendFeatures, allowCompressedFormats, true);
+
+    // If this feature is enabled, the context can be created with a certain requested version
+    // via EGL_ANGLE_create_context_backwards_compatible. Otherwise, the context will be created
+    // with the latest compatible version with the device.
+    ANGLE_FEATURE_CONDITION(&mFrontendFeatures, enableCreateContextBackwardsCompatible, true);
 
     // Togglable until work on the extension is complete - anglebug.com/40096838.
     ANGLE_FEATURE_CONDITION(&mFrontendFeatures, emulatePixelLocalStorage, true);
@@ -2565,8 +2551,8 @@ Error Display::programCacheQuery(EGLint index,
     if (key)
     {
         ASSERT(*keysize == static_cast<EGLint>(angle::kProgramCacheControlKeySize));
-        memset(key, 0, angle::kProgramCacheControlKeySize);
-        memcpy(key, programHash->data(), BlobCache::kKeyLength);
+        ANGLE_UNSAFE_TODO(memset(key, 0, angle::kProgramCacheControlKeySize));
+        ANGLE_UNSAFE_TODO(memcpy(key, programHash->data(), BlobCache::kKeyLength));
     }
 
     if (binary)
@@ -2579,7 +2565,7 @@ Error Display::programCacheQuery(EGLint index,
             return egl::Error(EGL_BAD_ACCESS, "Program binary too large or changed during access.");
         }
 
-        memcpy(binary, programBinary.data(), programBinary.size());
+        ANGLE_UNSAFE_TODO(memcpy(binary, programBinary.data(), programBinary.size()));
     }
 
     *binarysize = static_cast<EGLint>(programBinary.size());
@@ -2596,7 +2582,7 @@ Error Display::programCachePopulate(const void *key,
     ASSERT(keysize == static_cast<EGLint>(angle::kProgramCacheControlKeySize));
 
     BlobCache::Key programHash;
-    memcpy(programHash.data(), key, BlobCache::kKeyLength);
+    ANGLE_UNSAFE_TODO(memcpy(programHash.data(), key, BlobCache::kKeyLength));
 
     if (!mMemoryProgramCache.putBinary(programHash, reinterpret_cast<const uint8_t *>(binary),
                                        static_cast<size_t>(binarysize)))

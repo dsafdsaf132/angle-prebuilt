@@ -3909,6 +3909,9 @@ Extensions Context::generateSupportedExtensions() const
         supportedExtensions.clipDistanceAPPLE        = false;
         supportedExtensions.disjointTimerQueryEXT    = false;
         supportedExtensions.robustnessKHR            = false;
+
+        supportedExtensions.blendEquationAdvancedKHR         = false;
+        supportedExtensions.blendEquationAdvancedCoherentKHR = false;
     }
 
     if (getClientVersion() < ES_3_0)
@@ -3943,10 +3946,6 @@ Extensions Context::generateSupportedExtensions() const
         supportedExtensions.shaderMultisampleInterpolationOES  = false;
         supportedExtensions.shaderNoperspectiveInterpolationNV = false;
         supportedExtensions.sampleVariablesOES                 = false;
-
-        // Require ES 3.1 but could likely be exposed on 3.0
-        supportedExtensions.textureCubeMapArrayEXT = false;
-        supportedExtensions.textureCubeMapArrayOES = false;
 
         // Require RED and RG formats
         supportedExtensions.textureSRGBR8EXT  = false;
@@ -4011,6 +4010,8 @@ Extensions Context::generateSupportedExtensions() const
         supportedExtensions.tessellationShaderOES   = false;
         supportedExtensions.textureBufferEXT        = false;
         supportedExtensions.textureBufferOES        = false;
+        supportedExtensions.textureCubeMapArrayEXT  = false;
+        supportedExtensions.textureCubeMapArrayOES  = false;
     }
 
     if (getClientVersion() > ES_2_0)
@@ -4193,6 +4194,11 @@ Extensions Context::generateSupportedExtensions() const
             supportedExtensions.shaderNoperspectiveInterpolationNV = false;
         }
     }
+
+// Disable the explicit context extension if the entry points are not compiled.
+#if !defined(ANGLE_ENABLE_EXPLICIT_CONTEXT)
+    supportedExtensions.explicitContextANGLE = false;
+#endif
 
     return supportedExtensions;
 }
@@ -4983,20 +4989,6 @@ void Context::blitFramebuffer(GLint srcX0,
 
     ANGLE_CONTEXT_TRY(syncStateForBlit(mask));
     ANGLE_CONTEXT_TRY(drawFramebuffer->blit(this, srcArea, dstArea, mask, filter));
-}
-
-void Context::blitFramebufferNV(GLint srcX0,
-                                GLint srcY0,
-                                GLint srcX1,
-                                GLint srcY1,
-                                GLint dstX0,
-                                GLint dstY0,
-                                GLint dstX1,
-                                GLint dstY1,
-                                GLbitfield mask,
-                                GLenum filter)
-{
-    blitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter);
 }
 
 void Context::clear(GLbitfield mask)
@@ -6761,16 +6753,18 @@ void Context::getSynciv(SyncID syncPacked,
     ANGLE_CONTEXT_TRY(QuerySynciv(this, syncObject, pname, count, length, values));
 }
 
-void Context::getFramebufferParameteriv(GLenum target, GLenum pname, GLint *params)
+void Context::getFramebufferParameteriv(GLenum target,
+                                        FramebufferParameter pnamePacked,
+                                        GLint *params)
 {
     Framebuffer *framebuffer = mState.getTargetFramebuffer(target);
-    QueryFramebufferParameteriv(framebuffer, pname, params);
+    QueryFramebufferParameteriv(framebuffer, pnamePacked, params);
 }
 
-void Context::framebufferParameteri(GLenum target, GLenum pname, GLint param)
+void Context::framebufferParameteri(GLenum target, FramebufferParameter pnamePacked, GLint param)
 {
     Framebuffer *framebuffer = mState.getTargetFramebuffer(target);
-    SetFramebufferParameteri(this, framebuffer, pname, param);
+    SetFramebufferParameteri(this, framebuffer, pnamePacked, param);
 }
 
 bool Context::getScratchBuffer(size_t requstedSizeBytes,
@@ -9378,16 +9372,6 @@ void Context::maxShaderCompilerThreads(GLuint count)
     // between contexts.
     mState.setMaxShaderCompilerThreads(count);
     mImplementation->setMaxShaderCompilerThreads(count);
-}
-
-void Context::framebufferParameteriMESA(GLenum target, GLenum pname, GLint param)
-{
-    framebufferParameteri(target, pname, param);
-}
-
-void Context::getFramebufferParameterivMESA(GLenum target, GLenum pname, GLint *params)
-{
-    getFramebufferParameteriv(target, pname, params);
 }
 
 bool Context::isGLES1() const

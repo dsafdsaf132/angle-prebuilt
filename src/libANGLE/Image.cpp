@@ -68,7 +68,8 @@ gl::SourceImageIndex ImageSourceAttributes::toSourceIndex(const gl::OwnImageInde
 
     // If this is an EGL image target, it must be a renderbuffer or 2D texture, in which case it's
     // level and layer are both 0.
-    ASSERT(!ownIndex.getUntranslated().hasLayer() &&
+    ASSERT((!ownIndex.getUntranslated().hasLayer() ||
+            ownIndex.getUntranslated().getLayerIndex() == 0) &&
            ownIndex.getUntranslated().getLevelIndex() == 0);
     return gl::SourceImageIndex(gl::ImageIndex::MakeFromType(type, level, zoffset));
 }
@@ -87,6 +88,13 @@ gl::SourceLayer ImageSourceAttributes::toSourceLayer(gl::OwnLayer ownLayer) cons
     // texture layer is 0 (because EGL image target textures can only have one layer).
     ASSERT(ownLayer.getUntranslated() == 0 || zoffset == 0);
     return gl::SourceLayer(ownLayer.getUntranslated() + zoffset);
+}
+
+gl::SourceLayer ImageSourceAttributes::toSourceDepth(const gl::Offset &offset) const
+{
+    // zoffset only applies to 3D textures
+    return type == gl::TextureType::_3D ? toSourceLayer(gl::OwnLayer(offset.z))
+                                        : gl::SourceLayer(offset.z);
 }
 
 ImageSibling::ImageSibling() : FramebufferAttachmentObject(), mSourcesOf(), mTargetOf() {}

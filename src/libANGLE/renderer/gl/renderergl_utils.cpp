@@ -7,11 +7,8 @@
 // renderergl_utils.cpp: Conversion functions and other utility routines
 // specific to the OpenGL renderer.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #include "libANGLE/renderer/gl/renderergl_utils.h"
+#include "common/unsafe_buffers.h"
 
 #include <array>
 #include <limits>
@@ -38,6 +35,7 @@
 
 #include <EGL/eglext.h>
 #include <algorithm>
+#include <cctype>
 #include <sstream>
 
 using angle::CheckedNumeric;
@@ -70,8 +68,9 @@ bool IsMesa(const FunctionsGL *functions, std::array<int, 3> *version)
     }
 
     int *data = version->data();
-    data[0] = data[1] = data[2] = 0;
-    std::sscanf(nativeVersionString.c_str() + pos, "Mesa %d.%d.%d", data, data + 1, data + 2);
+    ANGLE_UNSAFE_TODO(data[0] = data[1] = data[2] = 0);
+    ANGLE_UNSAFE_TODO(
+        std::sscanf(nativeVersionString.c_str() + pos, "Mesa %d.%d.%d", data, data + 1, data + 2));
 
     return true;
 }
@@ -82,8 +81,8 @@ int getAdrenoNumber(const FunctionsGL *functions)
     if (number == -1)
     {
         const char *nativeGLRenderer = GetString(functions, GL_RENDERER);
-        if (std::sscanf(nativeGLRenderer, "Adreno (TM) %d", &number) < 1 &&
-            std::sscanf(nativeGLRenderer, "FD%d", &number) < 1)
+        if (ANGLE_UNSAFE_TODO(std::sscanf(nativeGLRenderer, "Adreno (TM) %d", &number)) < 1 &&
+            ANGLE_UNSAFE_TODO(std::sscanf(nativeGLRenderer, "FD%d", &number)) < 1)
         {
             number = 0;
         }
@@ -99,7 +98,7 @@ int GetQualcommVersion(const FunctionsGL *functions)
         const std::string nativeVersionString(GetString(functions, GL_VERSION));
         const size_t pos = nativeVersionString.find("V@");
         if (pos == std::string::npos ||
-            std::sscanf(nativeVersionString.c_str() + pos, "V@%d", &version) < 1)
+            ANGLE_UNSAFE_TODO(std::sscanf(nativeVersionString.c_str() + pos, "V@%d", &version)) < 1)
         {
             version = 0;
         }
@@ -113,7 +112,7 @@ int getMaliTNumber(const FunctionsGL *functions)
     if (number == -1)
     {
         const char *nativeGLRenderer = GetString(functions, GL_RENDERER);
-        if (std::sscanf(nativeGLRenderer, "Mali-T%d", &number) < 1)
+        if (ANGLE_UNSAFE_TODO(std::sscanf(nativeGLRenderer, "Mali-T%d", &number)) < 1)
         {
             number = 0;
         }
@@ -127,7 +126,7 @@ int getMaliGNumber(const FunctionsGL *functions)
     if (number == -1)
     {
         const char *nativeGLRenderer = GetString(functions, GL_RENDERER);
-        if (std::sscanf(nativeGLRenderer, "Mali-G%d", &number) < 1)
+        if (ANGLE_UNSAFE_TODO(std::sscanf(nativeGLRenderer, "Mali-G%d", &number)) < 1)
         {
             number = 0;
         }
@@ -223,6 +222,59 @@ bool PrecisionMeetsSpecForHighpFloat(const gl::TypePrecision &precision)
     return precision.range[0] >= 62 && precision.range[1] >= 62 && precision.precision >= 16;
 }
 }  // namespace
+
+// Example GL_VENDOR, GL_RENDERER and GL_VERSION strings:
+//   GL_VENDOR:   "Imagination Technologies"
+//   GL_RENDERER: "PowerVR D-Series DXT-48-1536"
+//   GL_VERSION:  "OpenGL ES 3.2 build 25.3@6908880"
+//   GL_VENDOR:   "Imagination Technologies"
+//   GL_RENDERER: "PowerVR D-Series DXT-48-1536"
+//   GL_VERSION:  "OpenGL ES 3.2 build 26.1@7000000"
+bool GetPowerVRDriverVersion(const std::string &vendorString,
+                             const std::string &rendererString,
+                             const std::string &versionString,
+                             std::array<int, 2> *versionOut)
+{
+    ASSERT(versionOut);
+    (*versionOut)[0] = 0;
+    (*versionOut)[1] = 0;
+
+    if (vendorString.find("Imagination") == std::string::npos)
+    {
+        return false;
+    }
+
+    if (rendererString.find("PowerVR") == std::string::npos)
+    {
+        return false;
+    }
+
+    size_t atPos = versionString.find('@');
+    if (atPos == std::string::npos)
+    {
+        return false;
+    }
+
+    size_t startPos = atPos;
+    while (startPos > 0 && !std::isspace(static_cast<unsigned char>(versionString[startPos - 1])))
+    {
+        --startPos;
+    }
+
+    // SAFETY: this offset is computed safely above.
+    std::istringstream stream(ANGLE_UNSAFE_BUFFERS(&versionString[startPos]));
+    int major = 0;
+    int minor = 0;
+    char dot  = 0;
+    if (!(stream >> major >> dot >> minor) || dot != '.')
+    {
+        return false;
+    }
+
+    (*versionOut)[0] = major;
+    (*versionOut)[1] = minor;
+    return true;
+}
 
 SwapControlData::SwapControlData()
     : targetSwapInterval(0), maxSwapInterval(-1), currentSwapInterval(-1)
@@ -673,7 +725,7 @@ static GLint QueryGLIntRange(const FunctionsGL *functions, GLenum name, size_t i
 {
     GLint result[2] = {};
     functions->getIntegerv(name, result);
-    return result[index];
+    return ANGLE_UNSAFE_TODO(result[index]);
 }
 
 static GLint64 QuerySingleGLInt64(const FunctionsGL *functions, GLenum name)
@@ -706,7 +758,7 @@ static GLfloat QueryGLFloatRange(const FunctionsGL *functions, GLenum name, size
 {
     GLfloat result[2] = {};
     functions->getFloatv(name, result);
-    return result[index];
+    return ANGLE_UNSAFE_TODO(result[index]);
 }
 
 static gl::TypePrecision QueryTypePrecision(const FunctionsGL *functions,
@@ -1594,10 +1646,6 @@ void GenerateCaps(const FunctionsGL *functions,
             QuerySingleGLInt(functions, GL_FRAGMENT_INTERPOLATION_OFFSET_BITS_OES);
     }
 
-    // Support video texture extension on non Android backends.
-    // TODO(crbug.com/776222): support Android and Apple devices.
-    extensions->videoTextureWEBGL = !IsAndroid() && !IsApple();
-
     if (features.multiviewViaViewportArray.enabled)
     {
         extensions->multiviewOVR  = true;
@@ -2356,6 +2404,13 @@ void InitializeFeatures(const FunctionsGL *functions, angle::FeaturesGL *feature
     ANGLE_FEATURE_CONDITION(features, unpackOverlappingRowsSeparatelyUnpackBuffer, isNvidia);
     ANGLE_FEATURE_CONDITION(features, packOverlappingRowsSeparatelyPackBuffer, isNvidia);
 
+    std::array<int, 2> powerVRVersion = {0, 0};
+    bool isPowerVRDriver =
+        GetPowerVRDriverVersion(GetVendorString(functions), GetRendererString(functions),
+                                GetVersionString(functions), &powerVRVersion);
+    ANGLE_FEATURE_CONDITION(features, splitLevel0PboFullSubImage2D,
+                            isPowerVRDriver && powerVRVersion < (std::array<int, 2>{26, 2}));
+
     ANGLE_FEATURE_CONDITION(features, initializeCurrentVertexAttributes, isNvidia);
 
     ANGLE_FEATURE_CONDITION(features, unpackLastRowSeparatelyForPaddingInclusion,
@@ -2781,6 +2836,7 @@ void InitializeFrontendFeatures(const FunctionsGL *functions, angle::FrontendFea
 {
     VendorID vendor = GetVendorID(functions);
     bool isQualcomm = IsQualcomm(vendor);
+    bool isMali     = IsARM(vendor);
 
     std::array<int, 3> mesaVersion = {0, 0, 0};
     bool isMesa                    = IsMesa(functions, &mesaVersion);
@@ -2788,7 +2844,7 @@ void InitializeFrontendFeatures(const FunctionsGL *functions, angle::FrontendFea
     // Program binaries don't contain transform feedback varyings on multiple vendors' GPUs.
     // https://crbug.com/442879525 for the latest example on Imagination / PowerVR.
     ANGLE_FEATURE_CONDITION(features, disableProgramCachingForTransformFeedback,
-                            (!isMesa && isQualcomm) || IsPowerVR(vendor));
+                            (!isMesa && isQualcomm) || IsPowerVR(vendor) || isMali);
     // https://crbug.com/480992
     // Disable shader program cache to workaround PowerVR Rogue issues.
     ANGLE_FEATURE_CONDITION(features, disableProgramBinary, IsPowerVrRogue(functions));
@@ -3092,28 +3148,28 @@ angle::FixedVector<uint8_t, 16> GetDepthOnePixel(GLenum type)
         {
             uint16_t val = 0xFFFF;
             result.resize(2);
-            memcpy(result.data(), &val, 2);
+            ANGLE_UNSAFE_TODO(memcpy(result.data(), &val, 2));
             break;
         }
         case GL_UNSIGNED_INT:
         {
             uint32_t val = 0xFFFFFFFF;
             result.resize(4);
-            memcpy(result.data(), &val, 4);
+            ANGLE_UNSAFE_TODO(memcpy(result.data(), &val, 4));
             break;
         }
         case GL_FLOAT:
         {
             float val = 1.0f;
             result.resize(4);
-            memcpy(result.data(), &val, 4);
+            ANGLE_UNSAFE_TODO(memcpy(result.data(), &val, 4));
             break;
         }
         case GL_UNSIGNED_INT_24_8:
         {
             uint32_t val = 0xFFFFFF00;
             result.resize(4);
-            memcpy(result.data(), &val, 4);
+            ANGLE_UNSAFE_TODO(memcpy(result.data(), &val, 4));
             break;
         }
         case GL_FLOAT_32_UNSIGNED_INT_24_8_REV:
@@ -3121,8 +3177,8 @@ angle::FixedVector<uint8_t, 16> GetDepthOnePixel(GLenum type)
             float d    = 1.0f;
             uint32_t s = 0;
             result.resize(8);
-            memcpy(result.data(), &d, 4);
-            memcpy(result.data() + 4, &s, 4);
+            ANGLE_UNSAFE_TODO(memcpy(result.data(), &d, 4));
+            ANGLE_UNSAFE_TODO(memcpy(result.data() + 4, &s, 4));
             break;
         }
         default:
@@ -3138,7 +3194,7 @@ void FillDepthOneMemory(GLenum type, angle::Span<uint8_t> span)
     CHECK(span.size() % pixelData.size() == 0);
     for (size_t offset = 0; offset < span.size(); offset += pixelData.size())
     {
-        memcpy(span.data() + offset, pixelData.data(), pixelData.size());
+        ANGLE_UNSAFE_TODO(memcpy(span.data() + offset, pixelData.data(), pixelData.size()));
     }
 }
 
@@ -3254,7 +3310,8 @@ uint8_t *MapBufferRangeWithFallback(const FunctionsGL *functions,
             return nullptr;
         }
 
-        return static_cast<uint8_t *>(functions->mapBuffer(target, accessEnum)) + offset;
+        return ANGLE_UNSAFE_TODO(static_cast<uint8_t *>(functions->mapBuffer(target, accessEnum)) +
+                                 offset);
     }
     else
     {

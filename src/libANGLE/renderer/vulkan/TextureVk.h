@@ -372,9 +372,8 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                                              GLint *rates) override;
 
   private:
-    // Transform an image index from the frontend into one that can be used on the backing
+    // Transform an image level/layer from the frontend into one that can be used on the backing
     // ImageHelper, taking into account mipmap or cube face offsets
-    gl::ImageIndex getNativeImageIndex(const gl::ImageIndex &inputImageIndex) const;
     gl::LevelIndex getNativeImageLevel(gl::LevelIndex frontendLevel) const;
     uint32_t getNativeImageLayer(uint32_t frontendLayer) const;
 
@@ -427,11 +426,11 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
     // If an image is in use by the GPU but is overwritten completely, a new VkImage can be created
     // instead to avoid creating an unnecessary dependency.
     angle::Result ghostOnOverwrite(ContextVk *contextVk,
-                                   const gl::ImageIndex &index,
+                                   const gl::SourceImageIndex &index,
                                    const gl::Box &area);
 
     angle::Result setImageImpl(const gl::Context *context,
-                               const gl::ImageIndex &index,
+                               const gl::OwnImageIndex &index,
                                const gl::InternalFormat &formatInfo,
                                const gl::Extents &size,
                                GLenum type,
@@ -439,7 +438,7 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                                gl::Buffer *unpackBuffer,
                                const uint8_t *pixels);
     angle::Result setSubImageImpl(const gl::Context *context,
-                                  const gl::ImageIndex &index,
+                                  const gl::SourceImageIndex &index,
                                   const gl::Box &area,
                                   const gl::InternalFormat &formatInfo,
                                   GLenum type,
@@ -450,7 +449,7 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
 
     // Used to clear a texture to a given value in part or whole.
     angle::Result clearSubImageImpl(const gl::Context *context,
-                                    GLint level,
+                                    gl::OwnLevel level,
                                     const gl::Box &clearArea,
                                     vk::ClearTextureMode clearMode,
                                     GLenum format,
@@ -458,13 +457,13 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                                     const uint8_t *data);
 
     angle::Result ensureImageInitializedIfUpdatesNeedStageOrFlush(ContextVk *contextVk,
-                                                                  gl::LevelIndex level,
+                                                                  gl::SourceLevel level,
                                                                   const vk::Format &vkFormat,
                                                                   vk::ApplyImageUpdate applyUpdate,
                                                                   bool usesBufferForUpdate);
 
     angle::Result copyImageDataToBufferAndGetData(ContextVk *contextVk,
-                                                  gl::LevelIndex sourceLevelGL,
+                                                  gl::SourceLevel sourceLevelGL,
                                                   uint32_t layerCount,
                                                   const gl::Box &sourceArea,
                                                   QueueSubmitReason reason,
@@ -473,7 +472,7 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
 
     angle::Result copyBufferDataToImage(ContextVk *contextVk,
                                         vk::BufferHelper *srcBuffer,
-                                        const gl::ImageIndex index,
+                                        const gl::SourceImageIndex index,
                                         uint32_t rowLength,
                                         uint32_t imageHeight,
                                         const gl::Box &sourceArea,
@@ -492,8 +491,8 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
     angle::Result generateMipmapLevelsWithCPU(ContextVk *contextVk,
                                               const angle::Format &sourceFormat,
                                               GLuint layer,
-                                              gl::LevelIndex firstMipLevel,
-                                              gl::LevelIndex maxMipLevel,
+                                              gl::SourceLevel firstMipLevel,
+                                              gl::SourceLevel maxMipLevel,
                                               const size_t sourceWidth,
                                               const size_t sourceHeight,
                                               const size_t sourceDepth,
@@ -509,10 +508,10 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                                    gl::Framebuffer *source);
 
     angle::Result copySubTextureImpl(ContextVk *contextVk,
-                                     const gl::ImageIndex &index,
+                                     const gl::SourceImageIndex &index,
                                      const gl::Offset &dstOffset,
                                      const gl::InternalFormat &dstFormat,
-                                     gl::LevelIndex sourceLevelGL,
+                                     gl::SourceLevel sourceLevelGL,
                                      const gl::Box &sourceBox,
                                      bool unpackFlipY,
                                      bool unpackPremultiplyAlpha,
@@ -523,8 +522,8 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                                                const gl::SourceImageIndex &index,
                                                const gl::Offset &dstOffset,
                                                const vk::Format &dstFormat,
-                                               gl::LevelIndex sourceLevelGL,
-                                               size_t sourceLayer,
+                                               gl::SourceLevel sourceLevelGL,
+                                               gl::SourceLayer sourceLayer,
                                                const gl::Box &sourceBox,
                                                vk::ImageHelper *srcImage);
 
@@ -532,7 +531,7 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
                                            const gl::SourceImageIndex &index,
                                            const gl::Offset &dstOffset,
                                            const vk::Format &dstFormat,
-                                           gl::LevelIndex sourceLevelGL,
+                                           gl::SourceLevel sourceLevelGL,
                                            const gl::Box &sourceBox,
                                            bool isSrcFlipY,
                                            bool unpackFlipY,
@@ -640,7 +639,7 @@ class TextureVk : public TextureImpl, public angle::ObserverInterface
     angle::Result convertBufferToRGBA(ContextVk *contextVk, size_t &conversionBufferSize);
     bool isCompressedFormatEmulated(const gl::Context *context,
                                     const gl::TextureTarget target,
-                                    GLint level);
+                                    gl::OwnLevel level);
 
     angle::Result setStorageImpl(ContextVk *contextVk,
                                  gl::TextureType type,

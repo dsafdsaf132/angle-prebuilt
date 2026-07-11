@@ -9,12 +9,9 @@
 #ifndef LIBANGLE_RENDERER_VULKAN_VK_HELPERS_H_
 #define LIBANGLE_RENDERER_VULKAN_VK_HELPERS_H_
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_libc_calls
-#endif
-
 #include "common/MemoryBuffer.h"
 #include "common/SimpleMutex.h"
+#include "common/unsafe_buffers.h"
 #include "libANGLE/renderer/vulkan/MemoryTracking.h"
 #include "libANGLE/renderer/vulkan/Suballocation.h"
 #include "libANGLE/renderer/vulkan/vk_barrier_data.h"
@@ -2661,10 +2658,7 @@ class ImageHelper final : public Resource, public angle::Subject
     angle::Result stagePartialClear(ContextVk *contextVk,
                                     const gl::Box &clearArea,
                                     const ClearTextureMode clearMode,
-                                    gl::TextureType textureType,
-                                    uint32_t levelIndexGL,
-                                    uint32_t layerIndex,
-                                    uint32_t layerCount,
+                                    const gl::ImageIndex &index,
                                     GLenum type,
                                     const gl::InternalFormat &formatInfo,
                                     const Format &vkFormat,
@@ -3080,7 +3074,7 @@ class ImageHelper final : public Resource, public angle::Subject
     {
         bool operator==(const ClearUpdate &rhs) const
         {
-            return memcmp(this, &rhs, sizeof(ClearUpdate)) == 0;
+            return ANGLE_UNSAFE_TODO(memcmp(this, &rhs, sizeof(ClearUpdate))) == 0;
         }
         VkImageAspectFlags aspectFlags;
         VkClearValue value;
@@ -3097,7 +3091,7 @@ class ImageHelper final : public Resource, public angle::Subject
     {
         bool operator==(const ClearPartialUpdate &rhs) const
         {
-            return memcmp(this, &rhs, sizeof(ClearPartialUpdate)) == 0;
+            return ANGLE_UNSAFE_TODO(memcmp(this, &rhs, sizeof(ClearPartialUpdate))) == 0;
         }
         VkImageAspectFlags aspectFlags;
         VkClearValue clearValue;
@@ -3107,8 +3101,6 @@ class ImageHelper final : public Resource, public angle::Subject
         uint32_t layerCount;
         VkOffset3D offset;
         VkExtent3D extent;
-        gl::TextureType textureType;
-        uint8_t _padding[3];
     };
     ANGLE_DISABLE_STRUCT_PADDING_WARNINGS
     struct BufferUpdate
@@ -3141,8 +3133,7 @@ class ImageHelper final : public Resource, public angle::Subject
                           const gl::ImageIndex &imageIndex);
         SubresourceUpdate(const VkImageAspectFlags aspectFlags,
                           const VkClearValue &clearValue,
-                          const gl::TextureType textureType,
-                          const uint32_t levelIndex,
+                          const gl::LevelIndex levelIndex,
                           const uint32_t layerIndex,
                           const uint32_t layerCount,
                           const gl::Box &clearArea);

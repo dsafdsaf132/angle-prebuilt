@@ -6,11 +6,8 @@
 
 // TextureGL.cpp: Implements the class methods for TextureGL.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #include "libANGLE/renderer/gl/TextureGL.h"
+#include "common/unsafe_buffers.h"
 
 #include "common/bitset_utils.h"
 #include "common/debug.h"
@@ -384,6 +381,38 @@ angle::Result TextureGL::setSubImage(const gl::Context *context,
                .lumaWorkaround.enabled);
 
     stateManager->bindTexture(getType(), mTextureID);
+    const gl::ImageDesc &desc = mState.getImageDesc(index);
+    const bool isFullImage    = area.x == 0 && area.y == 0 && area.width == desc.size.width &&
+                                area.height == desc.size.height;
+
+    if (features.splitLevel0PboFullSubImage2D.enabled && level == 0 && unpackBuffer &&
+        nativegl::UseTexImage2D(getType()) && isFullImage && (area.width > 1 || area.height > 1))
+    {
+        GLuint rowBytes   = 0;
+        GLuint imageBytes = 0;
+        GLuint skipBytes  = 0;
+        ANGLE_CHECK_GL_MATH(contextGL, originalInternalFormatInfo.computeRowDepthSkipBytes(
+                                           type, area.width, area.height, unpack, /*is3D=*/false,
+                                           &rowBytes, &imageBytes, &skipBytes));
+
+        size_t maxBytesUploadedPerChunk = 0;
+        if (area.height > 1)
+        {
+            maxBytesUploadedPerChunk = static_cast<size_t>(area.height - 1) * rowBytes;
+        }
+        else
+        {
+            ASSERT(area.height == 1 && area.width > 1);
+            GLuint pixelBytes        = originalInternalFormatInfo.computePixelBytes(type);
+            maxBytesUploadedPerChunk = static_cast<size_t>(area.width - 1) * pixelBytes;
+        }
+
+        ANGLE_TRY(setSubImageRowByRowWorkaround(context, target, level, area, format, type, unpack,
+                                                unpackBuffer, maxBytesUploadedPerChunk, pixels));
+        contextGL->markWorkSubmitted();
+        return angle::Result::Continue;
+    }
+
     if (features.unpackOverlappingRowsSeparatelyUnpackBuffer.enabled && unpackBuffer &&
         unpack.rowLength != 0 && unpack.rowLength < area.width)
     {
@@ -489,7 +518,7 @@ angle::Result TextureGL::setSubImageRowByRowWorkaround(const gl::Context *contex
     nativegl::TexSubImageFormat texSubImageFormat =
         nativegl::GetTexSubImageFormat(functions, features, format, type);
 
-    const uint8_t *pixelsWithSkip = pixels + skipBytes;
+    const uint8_t *pixelsWithSkip = ANGLE_UNSAFE_TODO(pixels + skipBytes);
     if (useTexImage3D)
     {
         for (GLint image = 0; image < area.depth; ++image)
@@ -499,7 +528,7 @@ angle::Result TextureGL::setSubImageRowByRowWorkaround(const gl::Context *contex
             {
                 GLint height             = std::min(rowsPerChunk, area.height - row);
                 GLint byteOffset         = imageByteOffset + row * rowBytes;
-                const GLubyte *rowPixels = pixelsWithSkip + byteOffset;
+                const GLubyte *rowPixels = ANGLE_UNSAFE_TODO(pixelsWithSkip + byteOffset);
                 ANGLE_GL_TRY(context,
                              functions->texSubImage3D(
                                  ToGLenum(target), static_cast<GLint>(level), area.x, row + area.y,
@@ -511,15 +540,35 @@ angle::Result TextureGL::setSubImageRowByRowWorkaround(const gl::Context *contex
     else
     {
         ASSERT(nativegl::UseTexImage2D(getType()));
-        for (GLint row = 0; row < area.height; row += rowsPerChunk)
+        if (area.height == 1 && maxBytesUploadedPerChunk > 0 && maxBytesUploadedPerChunk < rowBytes)
         {
-            GLint height             = std::min(rowsPerChunk, area.height - row);
-            GLint byteOffset         = row * rowBytes;
-            const GLubyte *rowPixels = pixelsWithSkip + byteOffset;
-            ANGLE_GL_TRY(context, functions->texSubImage2D(
-                                      ToGLenum(target), static_cast<GLint>(level), area.x,
-                                      row + area.y, area.width, height, texSubImageFormat.format,
-                                      texSubImageFormat.type, rowPixels));
+            GLuint pixelBytes    = glFormat.computePixelBytes(type);
+            GLint pixelsPerChunk = std::min(
+                std::max(static_cast<GLint>(maxBytesUploadedPerChunk / pixelBytes), 1), area.width);
+            for (GLint col = 0; col < area.width; col += pixelsPerChunk)
+            {
+                GLint width              = std::min(pixelsPerChunk, area.width - col);
+                GLint byteOffset         = col * pixelBytes;
+                const GLubyte *colPixels = ANGLE_UNSAFE_TODO(pixelsWithSkip + byteOffset);
+                ANGLE_GL_TRY(context, functions->texSubImage2D(
+                                          ToGLenum(target), static_cast<GLint>(level), area.x + col,
+                                          area.y, width, 1, texSubImageFormat.format,
+                                          texSubImageFormat.type, colPixels));
+            }
+        }
+        else
+        {
+            for (GLint row = 0; row < area.height; row += rowsPerChunk)
+            {
+                GLint height             = std::min(rowsPerChunk, area.height - row);
+                GLint byteOffset         = row * rowBytes;
+                const GLubyte *rowPixels = ANGLE_UNSAFE_TODO(pixelsWithSkip + byteOffset);
+                ANGLE_GL_TRY(context,
+                             functions->texSubImage2D(ToGLenum(target), static_cast<GLint>(level),
+                                                      area.x, row + area.y, area.width, height,
+                                                      texSubImageFormat.format,
+                                                      texSubImageFormat.type, rowPixels));
+            }
         }
     }
     return angle::Result::Continue;
@@ -572,7 +621,7 @@ angle::Result TextureGL::setSubImagePaddingWorkaround(const gl::Context *context
             // Do not include skipBytes in the last image pixel start offset as it will be done by
             // the driver
             size_t lastImageOffset         = (area.depth - 1) * imageBytes;
-            const GLubyte *lastImagePixels = pixels + lastImageOffset;
+            const GLubyte *lastImagePixels = ANGLE_UNSAFE_TODO(pixels + lastImageOffset);
             ANGLE_GL_TRY(context, functions->texSubImage3D(
                                       ToGLenum(target), static_cast<GLint>(level), area.x, area.y,
                                       area.z + area.depth - 1, area.width, area.height - 1, 1,
@@ -584,7 +633,7 @@ angle::Result TextureGL::setSubImagePaddingWorkaround(const gl::Context *context
 
         size_t lastRowOffset =
             skipBytes + (area.depth - 1) * imageBytes + (area.height - 1) * rowBytes;
-        const GLubyte *lastRowPixels = pixels + lastRowOffset;
+        const GLubyte *lastRowPixels = ANGLE_UNSAFE_TODO(pixels + lastRowOffset);
         ANGLE_GL_TRY(context,
                      functions->texSubImage3D(ToGLenum(target), static_cast<GLint>(level), area.x,
                                               area.y + area.height - 1, area.z + area.depth - 1,
@@ -606,7 +655,7 @@ angle::Result TextureGL::setSubImagePaddingWorkaround(const gl::Context *context
         ANGLE_TRY(stateManager->setPixelUnpackState(context, directUnpack));
 
         size_t lastRowOffset         = skipBytes + (area.height - 1) * rowBytes;
-        const GLubyte *lastRowPixels = pixels + lastRowOffset;
+        const GLubyte *lastRowPixels = ANGLE_UNSAFE_TODO(pixels + lastRowOffset);
         ANGLE_GL_TRY(context, functions->texSubImage2D(ToGLenum(target), static_cast<GLint>(level),
                                                        area.x, area.y + area.height - 1, area.width,
                                                        1, format, type, lastRowPixels));
@@ -2131,7 +2180,7 @@ angle::Result TextureGL::setMagFilter(const gl::Context *context, GLenum filter)
 angle::Result TextureGL::setSwizzle(const gl::Context *context, GLint swizzle[4])
 {
     gl::SwizzleState resultingSwizzle =
-        gl::SwizzleState(swizzle[0], swizzle[1], swizzle[2], swizzle[3]);
+        ANGLE_UNSAFE_TODO(gl::SwizzleState(swizzle[0], swizzle[1], swizzle[2], swizzle[3]));
 
     if (resultingSwizzle != mAppliedSwizzle)
     {
@@ -2152,12 +2201,15 @@ angle::Result TextureGL::setSwizzle(const gl::Context *context, GLint swizzle[4]
         {
             ANGLE_GL_TRY(context, functions->texParameteri(ToGLenum(getType()),
                                                            GL_TEXTURE_SWIZZLE_R, swizzle[0]));
-            ANGLE_GL_TRY(context, functions->texParameteri(ToGLenum(getType()),
-                                                           GL_TEXTURE_SWIZZLE_G, swizzle[1]));
-            ANGLE_GL_TRY(context, functions->texParameteri(ToGLenum(getType()),
-                                                           GL_TEXTURE_SWIZZLE_B, swizzle[2]));
-            ANGLE_GL_TRY(context, functions->texParameteri(ToGLenum(getType()),
-                                                           GL_TEXTURE_SWIZZLE_A, swizzle[3]));
+            ANGLE_UNSAFE_TODO(ANGLE_GL_TRY(
+                context,
+                functions->texParameteri(ToGLenum(getType()), GL_TEXTURE_SWIZZLE_G, swizzle[1])));
+            ANGLE_UNSAFE_TODO(ANGLE_GL_TRY(
+                context,
+                functions->texParameteri(ToGLenum(getType()), GL_TEXTURE_SWIZZLE_B, swizzle[2])));
+            ANGLE_UNSAFE_TODO(ANGLE_GL_TRY(
+                context,
+                functions->texParameteri(ToGLenum(getType()), GL_TEXTURE_SWIZZLE_A, swizzle[3])));
         }
         else
         {
@@ -2624,7 +2676,7 @@ angle::Result TextureGL::initializeContentsImpl(const gl::Context *context,
         }
         else
         {
-            uploadSpan = {zero->data(), imageSize};
+            uploadSpan = ANGLE_UNSAFE_TODO({zero->data(), imageSize});
         }
 
         if (nativegl::UseTexImage2D(getType()))

@@ -108,9 +108,6 @@ struct Limitations
 
     Limitations &operator=(const Limitations &other);
 
-    // In glVertexAttribDivisorANGLE, attribute zero must have a zero divisor
-    bool attributeZeroRequiresZeroDivisorInEXT = false;
-
     // Unable to support different values for front and back faces for stencil refs and masks
     bool noSeparateStencilRefsAndMasks = false;
 
@@ -120,9 +117,6 @@ struct Limitations
 
     // Renderer always clamps constant blend color.
     bool noUnclampedBlendColor = false;
-
-    // D3D9 does not support flexible varying register packing.
-    bool noFlexibleVaryingPacking = false;
 
     // D3D does not support having multiple transform feedback outputs go to the same buffer.
     bool noDoubleBoundTransformFeedbackBuffers = false;
@@ -742,9 +736,6 @@ struct DeviceExtensions
 
     // EGL_ANGLE_device_d3d
     bool deviceD3D = false;
-
-    // EGL_ANGLE_device_d3d9
-    bool deviceD3D9 = false;
 
     // EGL_ANGLE_device_d3d11
     bool deviceD3D11 = false;
