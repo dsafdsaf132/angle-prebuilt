@@ -86,6 +86,15 @@
             ]
         },
         {
+            "name": "pack_large_row_length_separately_pack_buffer",
+            "category": "Workarounds",
+            "description": [
+                "When packing to a pixel pack buffer with a row pitch >= 256MiB, pack row by row.",
+                "Mali GLES computes stride in bits as int32; row_length*bpp*8 wraps at 0x10000000."
+            ],
+            "issue": "http://crbug.com/529867799"
+        },
+        {
             "name": "initialize_current_vertex_attributes",
             "category": "Workarounds",
             "description": [
@@ -300,6 +309,15 @@
             "issue": "https://crbug.com/705865"
         },
         {
+            "name": "reset_base_level_for_ASTC_sub_image",
+            "category": "Workarounds",
+            "description": [
+                "Reset texture base level before calling glCompressedTexSubImage2D for ASTC textures to ",
+                "work around PowerVR driver bug."
+            ],
+            "issue": "https://crbug.com/528131939"
+        },
+        {
             "name": "limit_max_3d_array_texture_size_to_1024",
             "category": "Workarounds",
             "description": [
@@ -376,15 +394,6 @@
                 "position + offset, lod)."
             ],
             "issue": "http://crbug.com/642605"
-        },
-        {
-            "name": "regenerate_struct_names",
-            "category": "Workarounds",
-            "description": [
-                "All Mac drivers do not handle struct scopes correctly. This workaround overwrites a struct",
-                "name with a unique prefix."
-            ],
-            "issue": "http://crbug.com/403957"
         },
         {
             "name": "read_pixels_using_implementation_color_read_format_for_norm16",
@@ -933,6 +942,14 @@
                 "Split full-image level 0 PBO uploads via TexSubImage2D into two calls to work around driver bugs."
             ],
             "issue": "http://crbug.com/496807874"
+        },
+        {
+            "name": "limit_output_varyings_to_256_at_compile_time",
+            "category": "Workarounds",
+            "description": [
+                "Limit the number of declared varying components at compile time to work around a PowerVR driver bug."
+            ],
+            "issue": "http://crbug.com/529991907"
         }
     ]
 }

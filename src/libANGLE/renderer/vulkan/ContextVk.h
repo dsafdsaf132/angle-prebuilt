@@ -19,7 +19,6 @@
 #include "libANGLE/renderer/renderer_utils.h"
 #include "libANGLE/renderer/vulkan/DisplayVk.h"
 #include "libANGLE/renderer/vulkan/DriverUniforms.h"
-#include "libANGLE/renderer/vulkan/OverlayVk.h"
 #include "libANGLE/renderer/vulkan/PersistentCommandPool.h"
 #include "libANGLE/renderer/vulkan/ShareGroupVk.h"
 #include "libANGLE/renderer/vulkan/vk_helpers.h"
@@ -395,9 +394,6 @@ class ContextVk : public ContextImpl, public vk::Context, public MultisampleText
     // Semaphore creation.
     SemaphoreImpl *createSemaphore() override;
 
-    // Overlay creation.
-    OverlayImpl *createOverlay(const gl::OverlayState &state) override;
-
     angle::Result dispatchCompute(const gl::Context *context,
                                   GLuint numGroupsX,
                                   GLuint numGroupsY,
@@ -533,7 +529,6 @@ class ContextVk : public ContextImpl, public vk::Context, public MultisampleText
     angle::Result getTimestamp(uint64_t *timestampOut);
 
     const gl::Debug &getDebug() const { return mState.getDebug(); }
-    const gl::OverlayType *getOverlay() const { return mState.getOverlay(); }
 
     angle::Result onBufferReleaseToExternal(const vk::BufferHelper &buffer);
     angle::Result onImageReleaseToExternal(const vk::ImageHelper &image);
@@ -767,14 +762,18 @@ class ContextVk : public ContextImpl, public vk::Context, public MultisampleText
     // Used by QueryVk to share query helpers between transform feedback queries.
     QueryVk *getActiveRenderPassQuery(gl::QueryType queryType) const;
 
-    void syncObjectPerfCounters(const angle::VulkanPerfCounters &commandQueuePerfCounters);
-    void updateOverlayOnPresent();
-    void addOverlayUsedBuffersCount(vk::CommandBufferHelperCommon *commandBuffer);
+    void syncObjectPerfCounters(const vk::CommandQueuePerfCounters &commandQueuePerfCounters);
 
     // For testing only.
     void setDefaultUniformBlocksMinSizeForTesting(size_t minSize);
 
     vk::BufferHelper &getEmptyBuffer() { return mEmptyBuffer; }
+
+    // Returns a 1x1 placeholder storage image matching the shader's format
+    // for unbound image units.
+    angle::Result getOrCreateNullStorageImageView(GLenum shaderFormat,
+                                                  VkImageView *imageViewOut,
+                                                  vk::ImageOrBufferViewSerial *serialOut);
 
     // Keeping track of the buffer copy size. Used to determine when to submit the outside command
     // buffer.
@@ -1703,6 +1702,13 @@ class ContextVk : public ContextImpl, public vk::Context, public MultisampleText
     // atomic counter buffer array, or places where there is no vertex buffer since Vulkan does not
     // allow binding a null vertex buffer.
     vk::BufferHelper mEmptyBuffer;
+    struct NullStorageImageEntry
+    {
+        vk::ImageHelper image;
+        vk::ImageView view;
+        vk::ImageOrBufferViewSerial serial;
+    };
+    angle::HashMap<GLenum, std::unique_ptr<NullStorageImageEntry>> mNullStorageImages;
 
     // Storage for default uniforms of ProgramVks and ProgramPipelineVks.
     vk::DynamicBuffer mDefaultUniformStorage;

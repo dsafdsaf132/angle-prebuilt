@@ -1279,9 +1279,6 @@ TEST_P(RobustResourceInitTest, ReuploadingClearsTexture)
 {
     ANGLE_SKIP_TEST_IF(!hasGLExtension());
 
-    // crbug.com/826576
-    ANGLE_SKIP_TEST_IF(IsMac() && IsNVIDIA() && IsDesktopOpenGL());
-
     // Put some data into the texture
     std::array<GLColor, kWidth * kHeight> data;
     data.fill(GLColor::white);
@@ -2701,9 +2698,6 @@ TEST_P(RobustResourceInitTest, MaskedStencilClear)
 TEST_P(RobustResourceInitTestES3, MaskedStencilClearBuffer)
 {
     ANGLE_SKIP_TEST_IF(!hasGLExtension());
-
-    // http://anglebug.com/42261118
-    ANGLE_SKIP_TEST_IF(IsMac() && IsOpenGL() && (IsIntel() || IsNVIDIA()));
 
     ANGLE_SKIP_TEST_IF(IsLinux() && IsOpenGL());
 
@@ -4159,6 +4153,124 @@ TEST_P(RobustResourceInitTest, RedefineSiblingFace)
             EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::transparentBlack);
         }
     }
+    EXPECT_GL_NO_ERROR();
+}
+
+// Tests that partial clear of a packed depth-stencil attachment doesn't
+// incorrectly bypass robust initialization for the other aspect.
+TEST_P(RobustResourceInitTestES3, DepthClearWithStencilInit)
+{
+    ANGLE_SKIP_TEST_IF(!hasGLExtension());
+
+    constexpr int kSize = 16;
+
+    // Create a new FBO with a packed depth-stencil texture.
+    GLTexture dsTex;
+    glBindTexture(GL_TEXTURE_2D, dsTex);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_DEPTH24_STENCIL8, kSize, kSize);
+
+    GLTexture colorTex;
+    glBindTexture(GL_TEXTURE_2D, colorTex);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, kSize, kSize);
+
+    GLFramebuffer fbo;
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorTex, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, dsTex, 0);
+    EXPECT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+    // Clear only depth. This should leave the stencil aspect in MayNeedInit state,
+    // which shouldn't be overridden to Initialized.
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    // Then bind the stencil attachment here so that we can verify it was initialized:
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_TEXTURE_2D, dsTex, 0);
+
+    // Verify stencil is initialized to 0. We can do this by using the stencil side channel.
+    // robust-init mandates 0.
+    glEnable(GL_STENCIL_TEST);
+    glStencilFunc(GL_EQUAL, 0x00, 0xFF);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+
+    ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+    drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.95f, 1.0f, true);
+
+    // Read the color buffer to verify that stencil test passed for all pixels.
+    EXPECT_PIXEL_RECT_EQ(0, 0, kSize, kSize, GLColor::red);
+    EXPECT_GL_NO_ERROR();
+}
+
+// Tests that partial clear of a packed depth-stencil attachment (stencil-only) doesn't
+// incorrectly bypass robust initialization for the depth aspect.
+TEST_P(RobustResourceInitTestES3, StencilClearWithDepthInit)
+{
+    ANGLE_SKIP_TEST_IF(!hasGLExtension());
+
+    constexpr int kSize = 16;
+
+    // Create a new FBO with a packed depth-stencil texture.
+    GLTexture dsTex;
+    glBindTexture(GL_TEXTURE_2D, dsTex);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_DEPTH24_STENCIL8, kSize, kSize);
+
+    GLTexture colorTex;
+    glBindTexture(GL_TEXTURE_2D, colorTex);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, kSize, kSize);
+
+    GLFramebuffer fbo;
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorTex, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_TEXTURE_2D, dsTex, 0);
+    EXPECT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+    // Clear only stencil. This should leave the depth aspect in MayNeedInit state,
+    // which shouldn't be overridden to Initialized.
+    glClear(GL_STENCIL_BUFFER_BIT);
+
+    // Unbind the depth-stencil texture from the FBO so we can sample it as a texture.
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+
+    // Bind the texture to texture unit 0 and set filters.
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, dsTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    // Verify depth == 1.0 via shader sampling
+    constexpr char kVS[] = R"(#version 300 es
+in vec4 aPosition;
+void main()
+{
+    gl_Position = aPosition;
+})";
+
+    constexpr char kFS[] = R"(#version 300 es
+precision highp float;
+uniform highp sampler2D uDepthTex;
+out vec4 outColor;
+void main()
+{
+    float depth = texture(uDepthTex, vec2(0.5, 0.5)).r;
+    if (abs(depth - 1.0) < 0.001)
+    {
+        outColor = vec4(0.0, 1.0, 0.0, 1.0); // green
+    }
+    else
+    {
+        outColor = vec4(1.0, 0.0, 0.0, 1.0); // red
+    }
+})";
+
+    ANGLE_GL_PROGRAM(depthSampleProg, kVS, kFS);
+    glUseProgram(depthSampleProg);
+    GLint texLoc = glGetUniformLocation(depthSampleProg, "uDepthTex");
+    ASSERT_NE(texLoc, -1);
+    glUniform1i(texLoc, 0);
+
+    drawQuad(depthSampleProg, "aPosition", 0.0f);
+
+    // Read the color buffer to verify that depth was successfully initialized to 1.0f.
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
     EXPECT_GL_NO_ERROR();
 }
 

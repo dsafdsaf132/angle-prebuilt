@@ -29,7 +29,6 @@
 #include "libANGLE/renderer/vulkan/FenceNVVk.h"
 #include "libANGLE/renderer/vulkan/FramebufferVk.h"
 #include "libANGLE/renderer/vulkan/MemoryObjectVk.h"
-#include "libANGLE/renderer/vulkan/OverlayVk.h"
 #include "libANGLE/renderer/vulkan/ProgramPipelineVk.h"
 #include "libANGLE/renderer/vulkan/ProgramVk.h"
 #include "libANGLE/renderer/vulkan/QueryVk.h"
@@ -619,8 +618,6 @@ constexpr angle::PackedEnumMap<RenderPassClosureReason, const char *> kRenderPas
      "Temporary render pass used for image clear closed"},
     {RenderPassClosureReason::TemporaryForImageCopy,
      "Temporary render pass used for image copy closed"},
-    {RenderPassClosureReason::TemporaryForOverlayDraw,
-     "Temporary render pass used for overlay draw closed"},
     {RenderPassClosureReason::GraphicsTextureImageAccessThenComputeAccess,
      "Render pass closed due to implicit layout transition when image is used in compute after "
      "sampling"},
@@ -1266,6 +1263,13 @@ void ContextVk::onDestroy(const gl::Context *context)
     mDefaultUniformStorage.release(this);
     mEmptyBuffer.release(this);
 
+    for (auto &entry : mNullStorageImages)
+    {
+        entry.second->view.destroy(device);
+        entry.second->image.destroy(mRenderer);
+    }
+    mNullStorageImages.clear();
+
     for (vk::DynamicBuffer &defaultBuffer : mStreamedVertexBuffers)
     {
         defaultBuffer.destroy(mRenderer);
@@ -1332,6 +1336,55 @@ angle::Result ContextVk::getIncompleteTexture(const gl::Context *context,
                                               gl::Texture **textureOut)
 {
     return mIncompleteTextures.getIncompleteTexture(context, type, format, this, textureOut);
+}
+
+angle::Result ContextVk::getOrCreateNullStorageImageView(GLenum shaderFormat,
+                                                         VkImageView *imageViewOut,
+                                                         vk::ImageOrBufferViewSerial *serialOut)
+{
+    auto it = mNullStorageImages.find(shaderFormat);
+    if (it != mNullStorageImages.end())
+    {
+        *imageViewOut = it->second->view.getHandle();
+        *serialOut    = it->second->serial;
+        return angle::Result::Continue;
+    }
+
+    auto entry = std::make_unique<NullStorageImageEntry>();
+
+    angle::FormatID formatID = angle::Format::InternalFormatToID(shaderFormat);
+    if (mRenderer->getFeatures().emulateR32fImageAtomicExchange.enabled &&
+        formatID == angle::FormatID::R32_FLOAT)
+    {
+        formatID = angle::FormatID::R32_UINT;
+    }
+    const vk::Format &imageFormat = mRenderer->getFormat(formatID);
+    const VkExtent3D extent       = {1, 1, 1};
+
+    ANGLE_TRY(entry->image.init(this, gl::TextureType::_2D, extent, imageFormat, 1,
+                                VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                gl::LevelIndex(0), 1, 1, false, false, vk::TileMemory::Prohibited));
+    ANGLE_TRY(entry->image.initMemoryAndNonZeroFillIfNeeded(
+        this, mState.hasProtectedContent(), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        vk::MemoryAllocationType::TextureImage));
+    ANGLE_TRY(entry->image.initLayerImageViewWithUsage(
+        this, gl::TextureType::_2D, VK_IMAGE_ASPECT_COLOR_BIT, gl::SwizzleState(), &entry->view,
+        vk::LevelIndex(0), 1, 0, 1, VK_IMAGE_USAGE_STORAGE_BIT, GL_NONE));
+
+    const VkClearValue zeroClear = {};
+    entry->image.stageClear(gl::ImageIndex::Make2D(0), VK_IMAGE_ASPECT_COLOR_BIT, zeroClear);
+    ANGLE_TRY(entry->image.flushAllStagedUpdates(this));
+
+    entry->image.recordWriteBarrier(this, VK_IMAGE_ASPECT_COLOR_BIT,
+                                    vk::ImageAccess::AllGraphicsShadersWrite, gl::LevelIndex(0), 1,
+                                    0, 1, mOutsideRenderPassCommands);
+    entry->serial = mRenderer->getResourceSerialFactory().generateImageOrBufferViewSerial();
+
+    *imageViewOut = entry->view.getHandle();
+    *serialOut    = entry->serial;
+
+    mNullStorageImages.emplace(shaderFormat, std::move(entry));
+    return angle::Result::Continue;
 }
 
 angle::Result ContextVk::initialize(const angle::ImageLoadContext &imageLoadContext)
@@ -3601,7 +3654,7 @@ angle::Result ContextVk::handleDirtyDescriptorSetsImpl(CommandBufferHelperT *com
                                             &commandBufferHelper->getCommandBuffer(), pipelineType);
 }
 
-void ContextVk::syncObjectPerfCounters(const angle::VulkanPerfCounters &commandQueuePerfCounters)
+void ContextVk::syncObjectPerfCounters(const vk::CommandQueuePerfCounters &commandQueuePerfCounters)
 {
     if (!mState.isPerfMonitorActive())
     {
@@ -3609,7 +3662,6 @@ void ContextVk::syncObjectPerfCounters(const angle::VulkanPerfCounters &commandQ
     }
 
     mPerfCounters.descriptorSetCacheTotalSize                = 0;
-    mPerfCounters.descriptorSetCacheKeySizeBytes             = 0;
     mPerfCounters.uniformsAndXfbDescriptorSetCacheHits       = 0;
     mPerfCounters.uniformsAndXfbDescriptorSetCacheMisses     = 0;
     mPerfCounters.uniformsAndXfbDescriptorSetCacheTotalSize  = 0;
@@ -3619,7 +3671,6 @@ void ContextVk::syncObjectPerfCounters(const angle::VulkanPerfCounters &commandQ
     mPerfCounters.shaderResourcesDescriptorSetCacheHits      = 0;
     mPerfCounters.shaderResourcesDescriptorSetCacheMisses    = 0;
     mPerfCounters.shaderResourcesDescriptorSetCacheTotalSize = 0;
-    mPerfCounters.dynamicBufferAllocations                   = 0;
 
     // Share group descriptor set allocations and caching stats.
     ANGLE_UNSAFE_TODO(
@@ -3661,159 +3712,19 @@ void ContextVk::syncObjectPerfCounters(const angle::VulkanPerfCounters &commandQ
         mPerfCounters.descriptorSetCacheTotalSize =
             uniCacheStats.getSize() + texCacheStats.getSize() + uniBufCacheStats.getSize() +
             resCacheStats.getSize();
-
-        mPerfCounters.descriptorSetCacheKeySizeBytes = 0;
-
-        for (DescriptorSetIndex descriptorSetIndex : angle::AllEnums<DescriptorSetIndex>())
-        {
-            vk::MetaDescriptorPool &descriptorPool =
-                mShareGroupVk->getMetaDescriptorPools()[descriptorSetIndex];
-            mPerfCounters.descriptorSetCacheKeySizeBytes +=
-                descriptorPool.getTotalCacheKeySizeBytes();
-        }
     }
 
     // Update perf counters from the renderer as well
-    mPerfCounters.commandQueueSubmitCallsTotal =
-        commandQueuePerfCounters.commandQueueSubmitCallsTotal;
-    mPerfCounters.commandQueueSubmitCallsPerFrame =
-        commandQueuePerfCounters.commandQueueSubmitCallsPerFrame;
-    mPerfCounters.vkQueueSubmitCallsTotal    = commandQueuePerfCounters.vkQueueSubmitCallsTotal;
-    mPerfCounters.vkQueueSubmitCallsPerFrame = commandQueuePerfCounters.vkQueueSubmitCallsPerFrame;
+    mPerfCounters.commandQueueSubmitCallsTotal = commandQueuePerfCounters.queueSubmitCallsTotal;
+    mPerfCounters.vkQueueSubmitCallsTotal      = commandQueuePerfCounters.vkQueueSubmitCallsTotal;
     mPerfCounters.commandQueueWaitSemaphoresTotal =
-        commandQueuePerfCounters.commandQueueWaitSemaphoresTotal;
+        commandQueuePerfCounters.queueWaitSemaphoresTotal;
 
     // Return current drawFramebuffer's cache stats
     mPerfCounters.framebufferCacheSize = mFramebufferCache.getSize();
 
     mPerfCounters.pendingSubmissionGarbageObjects =
         static_cast<uint64_t>(mRenderer->getPendingSubmissionGarbageSize());
-}
-
-void ContextVk::updateOverlayOnPresent()
-{
-    const gl::OverlayType *overlay = mState.getOverlay();
-    ASSERT(overlay->isEnabled());
-
-    angle::VulkanPerfCounters commandQueuePerfCounters = mRenderer->getCommandQueuePerfCounters();
-    syncObjectPerfCounters(commandQueuePerfCounters);
-
-    // Update overlay if active.
-    {
-        gl::RunningGraphWidget *renderPassCount =
-            overlay->getRunningGraphWidget(gl::WidgetId::VulkanRenderPassCount);
-        renderPassCount->add(mRenderPassCommands->getAndResetCounter());
-        renderPassCount->next();
-    }
-
-    {
-        gl::RunningGraphWidget *writeDescriptorSetCount =
-            overlay->getRunningGraphWidget(gl::WidgetId::VulkanWriteDescriptorSetCount);
-        writeDescriptorSetCount->add(mPerfCounters.writeDescriptorSets);
-        writeDescriptorSetCount->next();
-    }
-
-    {
-        gl::RunningGraphWidget *descriptorSetAllocationCount =
-            overlay->getRunningGraphWidget(gl::WidgetId::VulkanDescriptorSetAllocations);
-        descriptorSetAllocationCount->add(mPerfCounters.descriptorSetAllocations);
-        descriptorSetAllocationCount->next();
-    }
-
-    {
-        gl::RunningGraphWidget *shaderResourceHitRate =
-            overlay->getRunningGraphWidget(gl::WidgetId::VulkanShaderResourceDSHitRate);
-        uint64_t numCacheAccesses = mPerfCounters.shaderResourcesDescriptorSetCacheHits +
-                                    mPerfCounters.shaderResourcesDescriptorSetCacheMisses;
-        if (numCacheAccesses > 0)
-        {
-            float hitRateFloat =
-                static_cast<float>(mPerfCounters.shaderResourcesDescriptorSetCacheHits) /
-                static_cast<float>(numCacheAccesses);
-            size_t hitRate = static_cast<size_t>(hitRateFloat * 100.0f);
-            shaderResourceHitRate->add(hitRate);
-            shaderResourceHitRate->next();
-        }
-    }
-
-    {
-        gl::RunningGraphWidget *dynamicBufferAllocations =
-            overlay->getRunningGraphWidget(gl::WidgetId::VulkanDynamicBufferAllocations);
-        dynamicBufferAllocations->next();
-    }
-
-    {
-        gl::CountWidget *cacheKeySize =
-            overlay->getCountWidget(gl::WidgetId::VulkanDescriptorCacheKeySize);
-        cacheKeySize->reset();
-        cacheKeySize->add(mPerfCounters.descriptorSetCacheKeySizeBytes);
-    }
-
-    {
-        gl::RunningGraphWidget *dynamicBufferAllocations =
-            overlay->getRunningGraphWidget(gl::WidgetId::VulkanDynamicBufferAllocations);
-        dynamicBufferAllocations->add(mPerfCounters.dynamicBufferAllocations);
-    }
-
-    {
-        gl::RunningGraphWidget *attemptedSubmissionsWidget =
-            overlay->getRunningGraphWidget(gl::WidgetId::VulkanAttemptedSubmissions);
-        attemptedSubmissionsWidget->add(commandQueuePerfCounters.commandQueueSubmitCallsPerFrame);
-        attemptedSubmissionsWidget->next();
-
-        gl::RunningGraphWidget *actualSubmissionsWidget =
-            overlay->getRunningGraphWidget(gl::WidgetId::VulkanActualSubmissions);
-        actualSubmissionsWidget->add(commandQueuePerfCounters.vkQueueSubmitCallsPerFrame);
-        actualSubmissionsWidget->next();
-    }
-
-    {
-        gl::RunningGraphWidget *cacheLookupsWidget =
-            overlay->getRunningGraphWidget(gl::WidgetId::VulkanPipelineCacheLookups);
-        cacheLookupsWidget->add(mPerfCounters.pipelineCreationCacheHits +
-                                mPerfCounters.pipelineCreationCacheMisses);
-        cacheLookupsWidget->next();
-
-        gl::RunningGraphWidget *cacheMissesWidget =
-            overlay->getRunningGraphWidget(gl::WidgetId::VulkanPipelineCacheMisses);
-        cacheMissesWidget->add(mPerfCounters.pipelineCreationCacheMisses);
-        cacheMissesWidget->next();
-
-        overlay->getCountWidget(gl::WidgetId::VulkanTotalPipelineCacheHitTimeMs)
-            ->set(mPerfCounters.pipelineCreationTotalCacheHitsDurationNs / 1000'000);
-        overlay->getCountWidget(gl::WidgetId::VulkanTotalPipelineCacheMissTimeMs)
-            ->set(mPerfCounters.pipelineCreationTotalCacheMissesDurationNs / 1000'000);
-    }
-}
-
-void ContextVk::addOverlayUsedBuffersCount(vk::CommandBufferHelperCommon *commandBuffer)
-{
-    const gl::OverlayType *overlay = mState.getOverlay();
-    if (!overlay->isEnabled())
-    {
-        return;
-    }
-
-    {
-        gl::RunningGraphWidget *textureDescriptorCacheSize =
-            overlay->getRunningGraphWidget(gl::WidgetId::VulkanTextureDescriptorCacheSize);
-        textureDescriptorCacheSize->add(mPerfCounters.textureDescriptorSetCacheTotalSize);
-        textureDescriptorCacheSize->next();
-    }
-
-    {
-        gl::RunningGraphWidget *uniformDescriptorCacheSize =
-            overlay->getRunningGraphWidget(gl::WidgetId::VulkanUniformDescriptorCacheSize);
-        uniformDescriptorCacheSize->add(mPerfCounters.uniformsAndXfbDescriptorSetCacheTotalSize);
-        uniformDescriptorCacheSize->next();
-    }
-
-    {
-        gl::RunningGraphWidget *descriptorCacheSize =
-            overlay->getRunningGraphWidget(gl::WidgetId::VulkanDescriptorCacheSize);
-        descriptorCacheSize->add(mPerfCounters.descriptorSetCacheTotalSize);
-        descriptorCacheSize->next();
-    }
 }
 
 angle::Result ContextVk::submitCommands(const vk::Semaphore *signalSemaphore,
@@ -6378,11 +6289,6 @@ SemaphoreImpl *ContextVk::createSemaphore()
     return new SemaphoreVk();
 }
 
-OverlayImpl *ContextVk::createOverlay(const gl::OverlayState &state)
-{
-    return new OverlayVk(state);
-}
-
 void ContextVk::invalidateCurrentDefaultUniforms()
 {
     const gl::ProgramExecutable *executable = mState.getProgramExecutable();
@@ -8037,8 +7943,6 @@ angle::Result ContextVk::flushCommandsAndEndRenderPassWithoutSubmit(RenderPassCl
 
     onRenderPassFinished(reason);
 
-    addOverlayUsedBuffersCount(mRenderPassCommands);
-
     pauseTransformFeedbackIfActiveUnpaused();
 
     ANGLE_TRY(mRenderPassCommands->endRenderPass(this));
@@ -8358,8 +8262,6 @@ angle::Result ContextVk::flushOutsideRenderPassCommands()
         return angle::Result::Continue;
     }
     ASSERT(mOutsideRenderPassCommands->getQueueSerial().valid());
-
-    addOverlayUsedBuffersCount(mOutsideRenderPassCommands);
 
     if (kEnableCommandStreamDiagnostics)
     {
@@ -9151,8 +9053,6 @@ void ContextVk::resetPerFramePerfCounters()
     mPerfCounters.flushedOutsideRenderPassCommandBuffers = 0;
     mPerfCounters.resolveImageCommands                   = 0;
     mPerfCounters.descriptorSetAllocations               = 0;
-
-    mRenderer->resetCommandQueuePerFrameCounters();
 
     mShareGroupVk->getMetaDescriptorPools()[DescriptorSetIndex::UniformsAndXfb]
         .resetDescriptorCacheStats();

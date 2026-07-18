@@ -4041,12 +4041,10 @@ angle::Result TextureVk::syncState(const gl::Context *context,
 
 angle::Result TextureVk::initializeContents(const gl::Context *context,
                                             GLenum binding,
-                                            const gl::OwnImageIndex &ownImageIndex)
+                                            const gl::OwnImageIndex &imageIndex)
 {
-    const gl::ImageIndex imageIndex = ownImageIndex.getUntranslated();
-
     ContextVk *contextVk      = vk::GetImpl(context);
-    const gl::ImageDesc &desc = mState.getImageDesc(imageIndex);
+    const gl::ImageDesc &desc = mState.getImageDesc(imageIndex.getUntranslated());
     const vk::Format &format =
         contextVk->getRenderer()->getFormat(desc.format.info->sizedInternalFormat);
 
@@ -4054,7 +4052,7 @@ angle::Result TextureVk::initializeContents(const gl::Context *context,
     // Note that we cannot ensure the image is initialized because we might be calling subImage
     // on a non-complete cube map.
     return mImage->stageRobustResourceClearWithFormat(
-        contextVk, imageIndex, desc.size, format.getIntendedFormat(),
+        contextVk, mState.toSourceIndex(imageIndex).get(), desc.size, format.getIntendedFormat(),
         format.getActualImageFormat(getRequiredFormatSupport()));
 }
 
@@ -4743,7 +4741,7 @@ angle::Result TextureVk::getTexImage(const gl::Context *context,
                                      GLenum type,
                                      void *pixels)
 {
-    const GLint level = ownLevel.getUntranslated().get();
+    const gl::SourceLevel level = mState.toSourceLevel(ownLevel);
 
     if (packBuffer && this->isCompressedFormatEmulated(context, target, ownLevel))
     {
@@ -4755,8 +4753,9 @@ angle::Result TextureVk::getTexImage(const gl::Context *context,
     ContextVk *contextVk = vk::GetImpl(context);
     ANGLE_TRY(ensureImageInitialized(contextVk, ImageMipLevels::EnabledLevels));
 
-    GLint baseLevel = static_cast<int>(mState.getBaseLevel());
-    if (level < baseLevel || level >= baseLevel + static_cast<int>(mState.getEnabledLevelCount()))
+    const gl::SourceLevel baseLevel = mState.toSourceLevel(gl::OwnLevel(mState.getBaseLevel()));
+    if (level.get() < baseLevel.get() ||
+        level.get() >= baseLevel.get() + static_cast<int>(mState.getEnabledLevelCount()))
     {
         // TODO(http://anglebug.com/42264855): Handle inconsistent textures.
         WARN() << "GetTexImage for inconsistent texture levels is not implemented.";
@@ -4767,7 +4766,7 @@ angle::Result TextureVk::getTexImage(const gl::Context *context,
     gl::MaybeOverrideLuminance(format, type, getColorReadFormat(context),
                                getColorReadType(context));
 
-    uint32_t layer      = 0;
+    uint32_t layer      = mState.toSourceLayer(gl::OwnLayer(gl::OwnLayer(0))).get();
     uint32_t layerCount = 1;
 
     switch (target)
@@ -4776,16 +4775,22 @@ angle::Result TextureVk::getTexImage(const gl::Context *context,
         case gl::TextureTarget::_2DArray:
             layerCount = mImage->getLayerCount();
             break;
+        case gl::TextureTarget::_3D:
+            layerCount = mImage->getLevelExtents(mImage->toVkLevel(level.get())).depth;
+            break;
         default:
             if (gl::IsCubeMapFaceTarget(target))
             {
-                layer = static_cast<uint32_t>(gl::CubeMapTextureTargetToFaceIndex(target));
+                layer = mState
+                            .toSourceLayer(gl::OwnLayer(
+                                static_cast<uint32_t>(gl::CubeMapTextureTargetToFaceIndex(target))))
+                            .get();
             }
             break;
     }
 
-    return mImage->readPixelsForGetImage(contextVk, packState, packBuffer, gl::LevelIndex(level),
-                                         layer, layerCount, format, type, pixels);
+    return mImage->readPixelsForGetImage(contextVk, packState, packBuffer, level.get(), layer,
+                                         layerCount, format, type, pixels);
 }
 
 angle::Result TextureVk::getCompressedTexImage(const gl::Context *context,
@@ -4795,13 +4800,14 @@ angle::Result TextureVk::getCompressedTexImage(const gl::Context *context,
                                                gl::OwnLevel ownLevel,
                                                void *pixels)
 {
-    const GLint level = ownLevel.getUntranslated().get();
+    const gl::SourceLevel level = mState.toSourceLevel(ownLevel);
 
     ContextVk *contextVk = vk::GetImpl(context);
     ANGLE_TRY(ensureImageInitialized(contextVk, ImageMipLevels::EnabledLevels));
 
-    GLint baseLevel = static_cast<int>(mState.getBaseLevel());
-    if (level < baseLevel || level >= baseLevel + static_cast<int>(mState.getEnabledLevelCount()))
+    const gl::SourceLevel baseLevel = mState.toSourceLevel(gl::OwnLevel(mState.getBaseLevel()));
+    if (level.get() < baseLevel.get() ||
+        level.get() >= baseLevel.get() + static_cast<int>(mState.getEnabledLevelCount()))
     {
         // TODO(http://anglebug.com/42264855): Handle inconsistent textures.
         WARN() << "GetCompressedTexImage for inconsistent texture levels is not implemented.";
@@ -4809,7 +4815,7 @@ angle::Result TextureVk::getCompressedTexImage(const gl::Context *context,
         return angle::Result::Continue;
     }
 
-    uint32_t layer      = 0;
+    uint32_t layer      = mState.toSourceLayer(gl::OwnLayer(gl::OwnLayer(0))).get();
     uint32_t layerCount = 1;
 
     switch (target)
@@ -4818,16 +4824,22 @@ angle::Result TextureVk::getCompressedTexImage(const gl::Context *context,
         case gl::TextureTarget::_2DArray:
             layerCount = mImage->getLayerCount();
             break;
+        case gl::TextureTarget::_3D:
+            layerCount = mImage->getLevelExtents(mImage->toVkLevel(level.get())).depth;
+            break;
         default:
             if (gl::IsCubeMapFaceTarget(target))
             {
-                layer = static_cast<uint32_t>(gl::CubeMapTextureTargetToFaceIndex(target));
+                layer = mState
+                            .toSourceLayer(gl::OwnLayer(
+                                static_cast<uint32_t>(gl::CubeMapTextureTargetToFaceIndex(target))))
+                            .get();
             }
             break;
     }
 
-    return mImage->readPixelsForCompressedGetImage(
-        contextVk, packState, packBuffer, gl::LevelIndex(level), layer, layerCount, pixels);
+    return mImage->readPixelsForCompressedGetImage(contextVk, packState, packBuffer, level.get(),
+                                                   layer, layerCount, pixels);
 }
 
 const vk::Format &TextureVk::getBaseLevelFormat(vk::Renderer *renderer) const

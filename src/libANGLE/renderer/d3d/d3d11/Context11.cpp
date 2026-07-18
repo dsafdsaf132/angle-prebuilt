@@ -19,7 +19,6 @@
 #include "libANGLE/Context.inl.h"
 #include "libANGLE/MemoryProgramCache.h"
 #include "libANGLE/histogram_macros.h"
-#include "libANGLE/renderer/OverlayImpl.h"
 #include "libANGLE/renderer/d3d/CompilerD3D.h"
 #include "libANGLE/renderer/d3d/ProgramExecutableD3D.h"
 #include "libANGLE/renderer/d3d/RenderbufferD3D.h"
@@ -174,8 +173,6 @@ TextureImpl *Context11::createTexture(const gl::TextureState &state)
     switch (state.getType())
     {
         case gl::TextureType::_2D:
-        // GL_TEXTURE_VIDEO_IMAGE_WEBGL maps to native 2D texture on Windows platform
-        case gl::TextureType::VideoImage:
             return new TextureD3D_2D(state, mRenderer);
         case gl::TextureType::CubeMap:
             return new TextureD3D_Cube(state, mRenderer);
@@ -256,12 +253,6 @@ SemaphoreImpl *Context11::createSemaphore()
 {
     UNREACHABLE();
     return nullptr;
-}
-
-OverlayImpl *Context11::createOverlay(const gl::OverlayState &state)
-{
-    // Not implemented.
-    return new OverlayImpl(state);
 }
 
 angle::Result Context11::flush(const gl::Context *context)

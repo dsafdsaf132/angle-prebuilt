@@ -623,7 +623,7 @@ GLuint TextureState::getEnabledLevelCount() const
     GLuint maxLevel        = getMipmapMaxLevel();
     ASSERT(maxLevel >= baseLevel);
 
-    // Note: for cube textures, we only check the first face.
+    // For cube textures, expect other faces to match the first face.
     TextureTarget target         = TextureTypeToTarget(mType, 0);
     const Format &expectedFormat = mImageDescs[GetImageDescIndex(target, baseLevel)].format;
 
@@ -640,6 +640,33 @@ GLuint TextureState::getEnabledLevelCount() const
         {
             break;
         }
+
+        // The cube map face checks are done for non-base levels only, because texture completeness
+        // rules already require base-level to be complete, and this function is used to know if any
+        // _additional_ levels are compatible with base.
+        if (enabledLevel != baseLevel && mType == gl::TextureType::CubeMap)
+        {
+            bool otherFacesValid                    = true;
+            angle::EnumIterator<TextureTarget> face = kCubeMapTextureTargetMin;
+            for (++face; face != kAfterCubeMapTextureTargetMax; ++face)
+            {
+                size_t otherFaceDescIndex          = GetImageDescIndex(*face, enabledLevel);
+                const Extents &otherFaceLevelSize  = mImageDescs[otherFaceDescIndex].size;
+                const Format &otherFaceLevelFormat = mImageDescs[otherFaceDescIndex].format;
+
+                if (otherFaceLevelSize != levelSize ||
+                    !Format::SameSized(otherFaceLevelFormat, levelFormat))
+                {
+                    otherFacesValid = false;
+                    break;
+                }
+            }
+            if (!otherFacesValid)
+            {
+                break;
+            }
+        }
+
         if (expectedSize.valid())
         {
             Extents newSize = expectedSize.value();
@@ -764,12 +791,7 @@ void TextureState::setImageDescChain(GLuint baseLevel,
 {
     for (GLuint level = baseLevel; level <= maxLevel; level++)
     {
-        int relativeLevel = (level - baseLevel);
-        Extents levelSize(std::max<int>(baseSize.width >> relativeLevel, 1),
-                          std::max<int>(baseSize.height >> relativeLevel, 1),
-                          (IsArrayTextureType(mType))
-                              ? baseSize.depth
-                              : std::max<int>(baseSize.depth >> relativeLevel, 1));
+        Extents levelSize = ComputeMipSize(baseSize, level - baseLevel, mType);
         ImageDesc levelInfo(levelSize, format, initState);
 
         if (mType == TextureType::CubeMap)
@@ -1466,6 +1488,8 @@ angle::Result Texture::setSubImage(Context *context,
 
     onStateChange(angle::SubjectMessage::ContentsChanged);
 
+    setInitState(GL_NONE, index, InitState::Initialized);
+
     return angle::Result::Continue;
 }
 
@@ -1518,6 +1542,8 @@ angle::Result Texture::setCompressedSubImage(const Context *context,
                                               unpackState, imageSize, pixels));
 
     onStateChange(angle::SubjectMessage::ContentsChanged);
+
+    setInitState(GL_NONE, index, InitState::Initialized);
 
     return angle::Result::Continue;
 }
@@ -1639,6 +1665,8 @@ angle::Result Texture::copySubImage(Context *context,
 
     onStateChange(angle::SubjectMessage::ContentsChanged);
 
+    setInitState(GL_NONE, index, InitState::Initialized);
+
     return angle::Result::Continue;
 }
 
@@ -1758,6 +1786,8 @@ angle::Result Texture::copySubTexture(const Context *context,
                                        unpackPremultiplyAlpha, unpackUnmultiplyAlpha, source));
 
     onStateChange(angle::SubjectMessage::ContentsChanged);
+
+    setInitState(GL_NONE, index, InitState::Initialized);
 
     return angle::Result::Continue;
 }
@@ -2041,6 +2071,12 @@ angle::Result Texture::clearSubImage(Context *context,
     ANGLE_TRY(handleMipmapGenerationHint(context, level));
 
     onStateChange(angle::SubjectMessage::ContentsChanged);
+
+    ImageIndexIterator setImagesIterator = allImagesIterator;
+    while (setImagesIterator.hasNext())
+    {
+        setInitState(GL_NONE, setImagesIterator.next(), InitState::Initialized);
+    }
 
     return angle::Result::Continue;
 }
@@ -2673,9 +2709,8 @@ angle::Result Texture::ensureSubImageInitialized(const Context *context,
         // NOTE: do not optimize this to only initialize the passed area of the texture, or the
         // initialization logic in copySubImage will be incorrect.
         ANGLE_TRY(initializeContents(context, GL_NONE, imageIndex));
+        setInitState(GL_NONE, imageIndex, InitState::Initialized);
     }
-    // Note: binding is ignored for textures.
-    setInitState(GL_NONE, imageIndex, InitState::Initialized);
     return angle::Result::Continue;
 }
 

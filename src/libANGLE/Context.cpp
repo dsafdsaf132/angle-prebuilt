@@ -694,7 +694,6 @@ Context::Context(egl::Display *display,
              shareTextures,
              shareSemaphores,
              AllocateOrUseContextMutex(sharedContextMutex),
-             &mOverlay,
              GetClientVersion(display, attribs),
              GetDebug(display->getFrontendFeatures(), attribs),
              GetBindGeneratesResource(attribs),
@@ -738,7 +737,6 @@ Context::Context(egl::Display *display,
       mProgramPipelineObserverBinding(this, kProgramPipelineSubjectIndex),
       mFrameCapture(new angle::FrameCapture),
       mRefCount(0),
-      mOverlay(mImplementation.get()),
       mIsDestroyed(false),
       mDestroyedManagers(false)
 {
@@ -884,16 +882,6 @@ void Context::initializeDefaultResources()
         mZeroTextures[TextureType::External].set(this, zeroTextureExternal);
     }
 
-    // This may change native TEXTURE_2D, TEXTURE_EXTERNAL_OES and TEXTURE_RECTANGLE,
-    // binding states. Ensure state manager is aware of this when binding
-    // this texture type.
-    if (mSupportedExtensions.videoTextureWEBGL)
-    {
-        Texture *zeroTextureVideoImage =
-            new Texture(mImplementation.get(), {0}, TextureType::VideoImage);
-        mZeroTextures[TextureType::VideoImage].set(this, zeroTextureVideoImage);
-    }
-
     mState.initializeZeroTextures(this, mZeroTextures);
 
     ANGLE_CONTEXT_TRY(mImplementation->initialize(mDisplay->getImageLoadContext()));
@@ -940,8 +928,6 @@ void Context::initializeDefaultResources()
     mCopyImageDirtyBits |= kCopyImageDirtyBitsBase;
     mCopyImageDirtyObjects |= kCopyImageDirtyObjectsBase;
     mTilingDirtyObjects |= kTilingDirtyObjectsBase;
-
-    mOverlay.init();
 }
 
 egl::Error Context::onDestroy(const egl::Display *display)
@@ -1031,8 +1017,6 @@ egl::Error Context::onDestroy(const egl::Display *display)
 
     // Backend requires implementation to be destroyed first to close down all the objects
     mState.mShareGroup->release(display);
-
-    mOverlay.destroy(this);
 
     return egl::NoError();
 }
@@ -10862,7 +10846,6 @@ void StateCache::updateValidBindTextureTypes(Context *context)
         {TextureType::Rectangle, exts.textureRectangleANGLE},
         {TextureType::CubeMap, true},
         {TextureType::CubeMapArray, isGLES32 || exts.textureCubeMapArrayAny()},
-        {TextureType::VideoImage, exts.videoTextureWEBGL},
         {TextureType::Buffer, isGLES32 || exts.textureBufferAny()},
     }};
 }

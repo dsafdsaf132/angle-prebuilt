@@ -139,7 +139,6 @@ constexpr angle::PackedEnumMap<QueueSubmitReason, const char *> kQueueSubmitReas
      "Queue submission imminent due to exceeding buffer-to-image update size limit"},
     {QueueSubmitReason::ForceSubmitStagedTexture,
      "Queue submission imminent due to staged texture updates"},
-    {QueueSubmitReason::DrawOverlay, "Queue submission imminent due to drawing overlay"},
     {QueueSubmitReason::InitializeMemory, "Queue submission imminent due to initializing memory"},
 }};
 }  // namespace
@@ -421,12 +420,6 @@ constexpr const char *kPreferBGR565SkippedMessages[] = {
 constexpr const char *kExposeNonConformantSkippedMessages[] = {
     // http://issuetracker.google.com/376899587
     "VUID-VkSwapchainCreateInfoKHR-presentMode-01427",
-};
-
-// VVL appears has a bug tracking stageMask on VkEvent with secondary command buffer.
-// https://github.com/KhronosGroup/Vulkan-ValidationLayers/issues/7849
-constexpr const char *kSkippedMessagesWithVulkanSecondaryCommandBuffer[] = {
-    "VUID-vkCmdWaitEvents-srcStageMask-parameter",
 };
 
 // When using Vulkan secondary command buffers, the command buffer is begun with the current
@@ -1088,8 +1081,6 @@ DebugUtilsMessenger(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
 
     bool isError    = (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0;
     std::string msg = log.str();
-
-    renderer->onNewValidationMessage(msg);
 
     if (isError)
     {
@@ -2142,7 +2133,6 @@ Renderer::Renderer()
       mPipelineCacheVkUpdateTimeout(kPipelineCacheVkUpdatePeriod),
       mPipelineCacheSizeAtLastSync(0),
       mPipelineCacheInitialized(false),
-      mValidationMessageCount(0),
       mIsColorFramebufferFetchCoherent(false),
       mIsColorFramebufferFetchUsed(false),
       mCleanUpThread(this, &mCommandQueue),
@@ -4989,16 +4979,6 @@ void Renderer::initializeValidationMessageSuppressions()
             kPreferBGR565SkippedMessages + ArraySize(kPreferBGR565SkippedMessages));
     }
 
-    if (getFeatures().useVkEventForImageBarrier.enabled &&
-        (!vk::OutsideRenderPassCommandBuffer::ExecutesInline() ||
-         !vk::RenderPassCommandBuffer::ExecutesInline()))
-    {
-        mSkippedValidationMessages.insert(
-            mSkippedValidationMessages.end(), kSkippedMessagesWithVulkanSecondaryCommandBuffer,
-            kSkippedMessagesWithVulkanSecondaryCommandBuffer +
-                ArraySize(kSkippedMessagesWithVulkanSecondaryCommandBuffer));
-    }
-
     if (!getFeatures().preferDynamicRendering.enabled &&
         !vk::RenderPassCommandBuffer::ExecutesInline())
     {
@@ -6750,9 +6730,8 @@ void Renderer::initFeatures(const vk::ExtensionNameList &deviceExtensionNames,
     // VkEvent instead of GPU overhead associated with vkCmdResetEvent.
     ANGLE_FEATURE_CONDITION(&mFeatures, recycleVkEvent, isSwiftShader);
 
-    // Disable for Samsung, details here -> http://anglebug.com/386749841#comment21
     ANGLE_FEATURE_CONDITION(&mFeatures, supportsDynamicRendering,
-                            mDynamicRenderingFeatures.dynamicRendering == VK_TRUE && !isSamsung);
+                            mDynamicRenderingFeatures.dynamicRendering == VK_TRUE);
 
     // Don't enable VK_KHR_maintenance5 without VK_KHR_dynamic_rendering
     ANGLE_FEATURE_CONDITION(&mFeatures, supportsMaintenance5,
@@ -6761,13 +6740,10 @@ void Renderer::initFeatures(const vk::ExtensionNameList &deviceExtensionNames,
 
     // Disabled on Nvidia driver due to a bug with attachment location mapping, resulting in
     // incorrect rendering in the presence of gaps in locations.  http://anglebug.com/372883691.
-    //
-    // Disable for Samsung, details here -> http://anglebug.com/386749841#comment21
     ANGLE_FEATURE_CONDITION(
         &mFeatures, supportsDynamicRenderingLocalRead,
         mFeatures.supportsDynamicRendering.enabled &&
-            mDynamicRenderingLocalReadFeatures.dynamicRenderingLocalRead == VK_TRUE &&
-            !(isNvidia || isSamsung));
+            mDynamicRenderingLocalReadFeatures.dynamicRenderingLocalRead == VK_TRUE && !isNvidia);
 
     // Using dynamic rendering when VK_KHR_dynamic_rendering_local_read is available, because that's
     // needed for framebuffer fetch, MSRTT and advanced blend emulation.
@@ -6776,8 +6752,9 @@ void Renderer::initFeatures(const vk::ExtensionNameList &deviceExtensionNames,
     // dynamic rendering.  If only version 1 is exposed, it's not sacrificied for dynamic rendering
     // and render pass objects are continued to be used.
     //
-    // Emulation of GL_EXT_multisampled_render_to_texture is not possible with dynamic rendering.
-    // That support is also not sacrificed for dynamic rendering.
+    // Using dynamic rendering when emulating GL_EXT_multisampled_render_to_texture is
+    // supported. Except for SwiftShader, which crashes when binding non-attachment textures as
+    // input attachments.
     //
     // Use of dynamic rendering is disabled on older ARM proprietary drivers due to driver bugs
     // (http://issuetracker.google.com/356051947).
@@ -6790,14 +6767,11 @@ void Renderer::initFeatures(const vk::ExtensionNameList &deviceExtensionNames,
     const bool hasLegacyDitheringV1 =
         mFeatures.supportsLegacyDithering.enabled &&
         (mLegacyDitheringVersion < 2 || !mFeatures.supportsMaintenance5.enabled);
-    const bool emulatesMultisampledRenderToTexture =
-        mFeatures.enableMultisampledRenderToTexture.enabled &&
-        !mFeatures.supportsMultisampledRenderToSingleSampled.enabled;
     ANGLE_FEATURE_CONDITION(
         &mFeatures, preferDynamicRendering,
         mFeatures.supportsDynamicRendering.enabled &&
             mFeatures.supportsDynamicRenderingLocalRead.enabled && !hasLegacyDitheringV1 &&
-            !emulatesMultisampledRenderToTexture &&
+            !isSwiftShader &&
             !(isARMProprietary && driverVersion < angle::VersionTriple(52, 0, 0)) &&
             !(isQualcommProprietary && driverVersion < angle::VersionTriple(512, 801, 0)) &&
             !isPowerVR);
@@ -7593,20 +7567,6 @@ void Renderer::cleanupPendingSubmissionGarbage()
     // Check if pending garbage is still pending. If not, move them to the garbage list.
     mSharedGarbageList.cleanupUnsubmittedGarbage(this);
     mSuballocationGarbageList.cleanupUnsubmittedGarbage(this);
-}
-
-void Renderer::onNewValidationMessage(const std::string &message)
-{
-    mLastValidationMessage = message;
-    ++mValidationMessageCount;
-}
-
-std::string Renderer::getAndClearLastValidationMessage(uint32_t *countSinceLastClear)
-{
-    *countSinceLastClear    = mValidationMessageCount;
-    mValidationMessageCount = 0;
-
-    return std::move(mLastValidationMessage);
 }
 
 uint64_t Renderer::getMaxFenceWaitTimeNs() const

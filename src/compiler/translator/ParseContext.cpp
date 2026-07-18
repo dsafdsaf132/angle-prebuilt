@@ -24,6 +24,7 @@
 #include "common/utilities.h"
 #include "compiler/preprocessor/SourceLocation.h"
 #include "compiler/translator/Declarator.h"
+#include "compiler/translator/ImmutableStringBuilder.h"
 #include "compiler/translator/ValidateGlobalInitializer.h"
 #include "compiler/translator/glslang.h"
 #include "compiler/translator/tree_util/BuiltIn.h"
@@ -386,7 +387,7 @@ angle::base::CheckedNumeric<size_t> CalculateVariableSize(const TType *type, boo
     if (type->isArray())
     {
         TType elementType = *type;
-        elementType.toArrayElementType();
+        elementType.toArrayBaseType();
         angle::base::CheckedNumeric<size_t> elementSize =
             CalculateVariableSize(&elementType, isStd140);
 
@@ -458,6 +459,69 @@ unsigned int GetMaxUniformBlocksForShaderType(sh::GLenum shaderType,
             UNREACHABLE();
             return 0;
     }
+}
+
+enum class StructureOriginalScope
+{
+    Global,
+    FunctionLocal,
+};
+
+TIntermDeclaration *RenameAndDeclareStruct(TSymbolTable *symbolTable,
+                                           TStructure *structure,
+                                           StructureOriginalScope scope)
+{
+    ASSERT(!structure->name().empty());
+
+    // We need +2 space for _0 if global, or +11 for "_uniqueId" if function-local.  Using +11
+    // always for simplicity.  +1 for the NUL terminator.
+    //
+    // If appending ID and the name is too long, cut off the end of the name.  The ID makes it
+    // unique.
+    constexpr uint32_t kAppendExtraChars = 1 + 11;  // underscore + 32-bit number
+    const ImmutableString name(
+        structure->name().data(),
+        std::min<size_t>(structure->name().length(), kESSLMaxIdentifierLength - kAppendExtraChars));
+
+    ImmutableStringBuilder builder(structure->name().length() + kAppendExtraChars);
+    builder << name << "_"
+            << (scope == StructureOriginalScope::Global ? 0 : structure->uniqueId().get());
+    structure->setName(builder);
+
+    TType *namedType = new TType(structure, true);
+    namedType->setQualifier(EvqGlobal);
+
+    TVariable *structVariable =
+        new TVariable(symbolTable, kEmptyImmutableString, namedType, SymbolType::Empty);
+    TIntermSymbol *structDeclarator       = new TIntermSymbol(structVariable);
+    TIntermDeclaration *structDeclaration = new TIntermDeclaration;
+    structDeclaration->appendDeclarator(structDeclarator);
+    return structDeclaration;
+}
+
+unsigned int GetTypeComponentCount(const TType &type)
+{
+    unsigned int components = 0;
+    if (type.getBasicType() == EbtInterfaceBlock)
+    {
+        for (const TField *field : type.getInterfaceBlock()->fields())
+        {
+            components += GetTypeComponentCount(*field->type());
+        }
+    }
+    else if (type.getStruct())
+    {
+        for (const TField *field : type.getStruct()->fields())
+        {
+            components += GetTypeComponentCount(*field->type());
+        }
+    }
+    else
+    {
+        components = static_cast<unsigned int>(type.getNominalSize()) * type.getSecondarySize();
+    }
+    components *= type.getArraySizeProduct();
+    return components;
 }
 }  // namespace
 
@@ -538,6 +602,7 @@ TParseContext::TParseContext(TSymbolTable &symt,
       mNumViews(-1),
       mMaxUniformBlocks(GetMaxUniformBlocksForShaderType(mShaderType, options, resources)),
       mNumUniformBlocks(0),
+      mNumOutputVaryingComponents(0),
       mDeclaringFunction(false),
       mDeclaringMain(false),
       mMainFunction(nullptr),
@@ -1360,11 +1425,11 @@ bool TParseContext::checkIsNotReserved(const TSourceLoc &line, const ImmutableSt
 
     // Validate that identifier names won't conflict with the name hashing done later.
     // See https://crbug.com/499176133
-    if ((identifier.length() >= kMaxAvailableIdentifierLength) &&
-        mResources.UserVariableNamePrefix != '\0' && identifier[0] == '_' &&
-        identifier[1] == mResources.UserVariableNamePrefix)
+    if (identifier.length() >= kMaxAvailableIdentifierLength && identifier[0] == '_' &&
+        (identifier[1] == mResources.UserVariableNamePrefix ||
+         identifier[1] == mResources.UserBlockNamePrefix))
     {
-        std::string err = "identifiers beginning with `_u` must be < " +
+        std::string err = "identifiers beginning with `_` must be < " +
                           std::to_string(kMaxAvailableIdentifierLength) + " characters";
         error(line, err.c_str(), identifier);
         return false;
@@ -1868,32 +1933,38 @@ bool TParseContext::checkVariableSize(const TSourceLoc &line,
     // shader should ever hit it.
     //
     // The size check does not take std430 into account as it is intended for WebGL shaders.  For
-    // the same reason, other shader stages than vertex/fragment are ignored as defer-sized
+    // the same reason, other shader stages than vertex/fragment/compute are ignored as defer-sized
     // variables e.g. in geometry shaders are not handled.
     if (!mCompileOptions.rejectWebglShadersWithLargeVariables ||
-        (mShaderType != GL_VERTEX_SHADER && mShaderType != GL_FRAGMENT_SHADER))
+        (mShaderType != GL_VERTEX_SHADER && mShaderType != GL_FRAGMENT_SHADER &&
+         mShaderType != GL_COMPUTE_SHADER))
     {
         return true;
     }
 
     // Check the cache of validated types first.
+    size_t variableSize   = 0;
     auto preValidatedIter = mValidatedVariableTypeSizes.find(*type);
     if (preValidatedIter != mValidatedVariableTypeSizes.end())
     {
-        return preValidatedIter->second;
+        variableSize = preValidatedIter->second;
+    }
+    else
+    {
+        // Note: the only allowed interface block in webgl shaders is UBOs in std140 mode, so the
+        // size is unconditionally calculated with std140 rules if the variable is an interface
+        // block. Uniform variables are treated the same way as UBOs, as they are often packed the
+        // same way later on.
+        variableSize = CalculateVariableSize(
+                           type, type->isInterfaceBlock() || type->getQualifier() == EvqUniform)
+                           .ValueOrDefault(std::numeric_limits<size_t>::max());
+
+        mValidatedVariableTypeSizes[*type] = variableSize;
     }
 
-    // Note: the only allowed interface block in webgl shaders is UBOs in std140 mode, so the size
-    // is unconditionally calculated with std140 rules if the variable is an interface block.
-    // Uniform variables are treated the same way as UBOs, as they are often packed the same way
-    // later on.
-    const size_t variableSize =
-        CalculateVariableSize(type, type->isInterfaceBlock() || type->getQualifier() == EvqUniform)
-            .ValueOrDefault(std::numeric_limits<size_t>::max());
     if (variableSize > kWebGLMaxVariableSizeInBytes)
     {
         error(line, "Size of declared variable exceeds implementation-defined limit", identifier);
-        mValidatedVariableTypeSizes[*type] = false;
         return false;
     }
 
@@ -1940,7 +2011,6 @@ bool TParseContext::checkVariableSize(const TSourceLoc &line,
                 error(line,
                       "Size of declared private variable exceeds implementation-defined limit",
                       identifier);
-                mValidatedVariableTypeSizes[*type] = false;
                 return false;
             }
             mTotalPrivateVariablesSize += variableSize;
@@ -1949,7 +2019,6 @@ bool TParseContext::checkVariableSize(const TSourceLoc &line,
             break;
     }
 
-    mValidatedVariableTypeSizes[*type] = true;
     return true;
 }
 
@@ -2300,6 +2369,7 @@ bool TParseContext::declareVariable(const TSourceLoc &line,
         error(line, "redefinition", identifier);
         return false;
     }
+    addAndCheckOutputVaryings(**variable, line);
 
     if (!checkIsNonVoid(line, identifier, type->getBasicType()))
     {
@@ -6320,7 +6390,7 @@ TFunctionLookup *TParseContext::addConstructorFunc(const TPublicType &publicType
         error(publicType.getLine(), "array constructor supported in GLSL ES 3.00 and above only",
               "[]");
     }
-    if (publicType.isStructSpecifier())
+    if (publicType.isStructSpecifierForValidation())
     {
         error(publicType.getLine(), "constructor can't be a structure definition",
               getBasicString(publicType.getBasicType()));
@@ -6359,7 +6429,7 @@ TParameter TParseContext::parseParameterDeclarator(const TPublicType &type,
             error(nameLoc, "illegal use of type 'void'", name);
         }
     }
-    if (type.isStructSpecifier())
+    if (type.isStructSpecifierForValidation())
     {
         // ESSL 3.00.6 section 12.10.
         error(nameLoc, "Function parameter type cannot be a structure definition", name);
@@ -6992,6 +7062,7 @@ TIntermDeclaration *TParseContext::addInterfaceBlock(
                 error(field->line(), "redefinition of an interface block member name",
                       field->name());
             }
+            addAndCheckOutputVaryings(*fieldVariable, field->line());
 
             // Don't declare variables for fields of nameless interface blocks in the IR, just
             // remember to implicitly index the instance variable when referenced.
@@ -7021,6 +7092,7 @@ TIntermDeclaration *TParseContext::addInterfaceBlock(
         {
             error(instanceLine, "redefinition of an interface block instance name", instanceName);
         }
+        addAndCheckOutputVaryings(*instanceVariable, instanceLine);
     }
 
     TIntermSymbol *blockSymbol = new TIntermSymbol(instanceVariable);
@@ -8427,7 +8499,8 @@ TTypeSpecifierNonArray TParseContext::addStructure(const TSourceLoc &structLine,
                                                    TFieldList *fieldList)
 {
     SymbolType structSymbolType = SymbolType::UserDefined;
-    if (structName.empty())
+    const bool isNamelessStruct = structName.empty();
+    if (isNamelessStruct)
     {
         structSymbolType = SymbolType::Empty;
     }
@@ -8536,9 +8609,23 @@ TTypeSpecifierNonArray TParseContext::addStructure(const TSourceLoc &structLine,
             angle::Span<const TField *const>(reorderedFields->data(), reorderedFields->size())),
         {}, false, false, symbolTable.atGlobalLevel());
 
+    // Nameless structs are declared inline with their variables.  But named structs are always
+    // separately declared at the end of parse.
     TTypeSpecifierNonArray typeSpecifierNonArray;
-    typeSpecifierNonArray.initializeStruct(structure, true, structLine);
+    typeSpecifierNonArray.initializeStruct(structure, isNamelessStruct, true, structLine);
     exitStructDeclaration();
+
+    if (!isNamelessStruct)
+    {
+        if (symbolTable.atGlobalLevel())
+        {
+            mGlobalNamedStructs.push_back(structure);
+        }
+        else
+        {
+            mFunctionLocalNamedStructs.push_back(structure);
+        }
+    }
 
     return typeSpecifierNonArray;
 }
@@ -10240,6 +10327,39 @@ void TParseContext::endStatementWithValue(TIntermNode *statement)
     }
 }
 
+void TParseContext::prependPendingStructDeclarations()
+{
+    TIntermSequence allStructDecls;
+
+    // Do the following for all structs:
+    //
+    // * First, modify the name of the struct.  This breaks the symbol table, as names cannot be
+    //   looked up anymore, but that's ok because this is the end of parse and no transformation
+    //   looks up user symbol names anymore.  The struct names are used during link to match
+    //   uniforms, and so for global structs, the name is suffixed by |_0| to be identical between
+    //   shader stages.  For function-local structs it's suffixed by |_uniqueId|
+    // * Then, create a global declarator for the struct and append it to the list of declarations.
+    //
+    // The whole list is prepended to the shader at the end.  Global structs are declared first, as
+    // they may be used by function-local structs.  Within global or function-local structs, they
+    // are declared in the order they are encountered in the shader for the same reason.
+
+    for (TStructure *structure : mGlobalNamedStructs)
+    {
+        allStructDecls.push_back(
+            RenameAndDeclareStruct(&symbolTable, structure, StructureOriginalScope::Global));
+    }
+
+    for (TStructure *structure : mFunctionLocalNamedStructs)
+    {
+        allStructDecls.push_back(
+            RenameAndDeclareStruct(&symbolTable, structure, StructureOriginalScope::FunctionLocal));
+    }
+
+    mTreeRoot->getSequence()->insert(mTreeRoot->getSequence()->begin(), allStructDecls.begin(),
+                                     allStructDecls.end());
+}
+
 void TParseContext::checkCallGraph()
 {
     // Verify that the call graph does not contain a loop.
@@ -10534,6 +10654,12 @@ bool TParseContext::postParseChecks()
     ASSERT(!mCompileOptions.useIR || mTreeRoot != nullptr);
 #endif
 
+    // Struct declarations are delayed to the end of parse, add them to the AST now
+    if (mTreeRoot != nullptr)
+    {
+        prependPendingStructDeclarations();
+    }
+
     // If gl_Position is expected to be zero-initialized, make sure it's declared to the IR; it
     // should still be done if gl_Position is statically not used by the shader.
     if (mCompileOptions.initGLPosition)
@@ -10669,6 +10795,44 @@ bool TParseContext::postParseChecks()
     checkCallGraph();
 
     return numErrors() == 0;
+}
+
+void TParseContext::addAndCheckOutputVaryings(const TVariable &variable, const TSourceLoc &line)
+{
+    if (mShaderType != GL_VERTEX_SHADER)
+    {
+        return;
+    }
+
+    if (!mCompileOptions.limitOutputVaryingsTo256)
+    {
+        return;
+    }
+
+    if (variable.symbolType() == SymbolType::BuiltIn)
+    {
+        return;
+    }
+
+    if (!IsVaryingOut(variable.getType().getQualifier()))
+    {
+        return;
+    }
+
+    angle::CheckedNumeric<unsigned int> checkedNum = mNumOutputVaryingComponents;
+    checkedNum += GetTypeComponentCount(variable.getType());
+    mNumOutputVaryingComponents =
+        checkedNum.ValueOrDefault(std::numeric_limits<unsigned int>::max());
+
+    // The cap to 256 vec4s = 1024 components seems somewhat arbitrary, but this is intended as a
+    // workaround for a specific driver bug, and this limit being much
+    // higher than the device limits (mResources.MaxVertexOutputVectors *
+    // 4), it avoids regressing both tests and applications.
+    if (mNumOutputVaryingComponents > 1024)
+    {
+        error(line, "Too many declared shader output varying components for this device",
+              variable.name());
+    }
 }
 
 //
