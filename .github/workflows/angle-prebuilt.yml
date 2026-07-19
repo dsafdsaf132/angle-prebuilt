@@ -73,29 +73,50 @@ jobs:
                 -H "Accept: application/vnd.github+json" \
                 "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/heads/$target_branch"
             )"
-            build_ref="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["object"]["sha"])' <<< "$ref_json")"
-            if [[ ! "$build_ref" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "::error::Invalid branch HEAD SHA for $target_branch: $build_ref"
+            branch_head="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["object"]["sha"])' <<< "$ref_json")"
+            if [[ ! "$branch_head" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::Invalid branch HEAD SHA for $target_branch: $branch_head"
               exit 1
             fi
             echo "Workflow run branch: $target_branch"
-            echo "Current branch HEAD: $build_ref"
-            commit_json="$(
-              curl -fsSL \
-                --retry 5 \
-                --retry-delay 5 \
-                --retry-all-errors \
-                --connect-timeout 20 \
-                -H "Authorization: Bearer $GH_TOKEN" \
-                -H "Accept: application/vnd.github+json" \
-                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$build_ref"
-            )"
-            message="$(
-              python3 -c 'import json, sys; print(json.load(sys.stdin)["commit"]["message"])' \
-                <<< "$commit_json"
-            )"
-            if [[ "$message" =~ Upstream-ANGLE-Commit-Position:[[:space:]]*([0-9]+) ]]; then
-              tag="angle-main-${BASH_REMATCH[1]}"
+            echo "Current branch HEAD: $branch_head"
+            candidate="$branch_head"
+            sync_position=""
+            for _ in {1..50}; do
+              commit_json="$(
+                curl -fsSL \
+                  --retry 5 \
+                  --retry-delay 5 \
+                  --retry-all-errors \
+                  --connect-timeout 20 \
+                  -H "Authorization: Bearer $GH_TOKEN" \
+                  -H "Accept: application/vnd.github+json" \
+                  "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$candidate"
+              )"
+              message="$(
+                python3 -c 'import json, sys; print(json.load(sys.stdin)["commit"]["message"])' \
+                  <<< "$commit_json"
+              )"
+              if [[ "$message" =~ Upstream-ANGLE-Commit-Position:[[:space:]]*([0-9]+) ]]; then
+                build_ref="$candidate"
+                sync_position="${BASH_REMATCH[1]}"
+                echo "Latest upstream sync commit: $build_ref"
+                break
+              fi
+              candidate="$(
+                python3 -c 'import json, sys; parents=json.load(sys.stdin).get("parents", []); print(parents[0]["sha"] if parents else "")' \
+                  <<< "$commit_json"
+              )"
+              if [[ -z "$candidate" ]]; then
+                break
+              fi
+              if [[ ! "$candidate" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "::error::Invalid parent SHA while scanning $target_branch history: $candidate"
+                exit 1
+              fi
+            done
+            if [[ -n "$sync_position" ]]; then
+              tag="angle-main-$sync_position"
               status="$(
                 curl -fsS -o /dev/null -w "%{http_code}" \
                   --retry 5 \
@@ -116,7 +137,7 @@ jobs:
                 exit 1
               fi
             else
-              echo "Triggering commit is not an upstream sync commit; skipping workflow_run build"
+              echo "No recent upstream sync commit found on $target_branch; skipping workflow_run build"
             fi
           fi
           echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
