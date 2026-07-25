@@ -296,6 +296,7 @@ class DescriptorPoolHelper final : angle::NonCopyable
     bool recycleFromGarbage(Renderer *renderer, DescriptorSetPointer *descriptorSetOut);
     void destroyGarbage();
     void cleanupPendingGarbage();
+    void forceFinishPendingGarbage();
 
     bool hasValidDescriptorSet() const { return mValidDescriptorSets != 0; }
     bool canDestroy() const { return mValidDescriptorSets == 0 && mPendingGarbageList.empty(); }
@@ -2337,8 +2338,7 @@ class ImageHelper final : public Resource, public angle::Subject
     VkResult initMemory(ErrorContext *context,
                         VkMemoryPropertyFlags flags,
                         VkMemoryPropertyFlags excludedFlags,
-                        const VkMemoryRequirements *memoryRequirements,
-                        const bool allocateDedicatedMemory,
+                        VkMemoryRequirements *memoryRequirements,
                         MemoryAllocationType allocationType,
                         VkMemoryPropertyFlags *flagsOut,
                         VkDeviceSize *sizeOut);

@@ -21,6 +21,7 @@
 42266349 VULKAN : MultithreadingTestES3.UnsynchronizedTextureReads2/* = SKIP
 377614665 VULKAN : GLSLValidationTest.StructSamplerVsComma/* = SKIP
 410584007 VULKAN : ImageTestES31.UseSourceTextureAsStorageImage/* = SKIP
+535696694 VULKAN : Texture2DTestES3_NonZeroBaseLevelGenMipmaps.UploadAfterDrawShouldNotCrash/* = SKIP
 514710696 : PbufferTest.BindTexImageAndGenerateMipmap/* = SKIP
 // Fails anywhere RGBA4 is emulated with RGBA8
 534823410 VULKAN : FramebufferTestWithFormatFallback.R4G4B4A4_CubeTexImageRedefinedFaceZero/ES3_Vulkan_SwiftShader_ForceRenderableFallbackFormat = SKIP
@@ -211,6 +212,7 @@
 463961767 WIN INTEL OPENGL : EGLSurfacelessContextTest.Switcheroo/* = SKIP
 494350632 WIN INTEL OPENGL : MipmapTestES3.MismatchingLevelFormats/* = SKIP
 355607623 WIN INTEL OPENGL : WebGL2GLSLTest.BasicInfiniteLoop/* = SKIP
+537235696 WIN INTEL OPENGL : ClipDistance*.ThreeClipDistancesRedeclaredAndPassedToFunction/* = SKIP
 // Some Intel Vulkan drivers report incorrect VkPhysicalDeviceLimits::maxSamplerLodBias on Windows.
 498165510 WIN INTEL VULKAN : QCOMTextureLodBiasTest.BiasClamping/* = SKIP
 
@@ -224,6 +226,7 @@
 352085732 WIN INTEL OPENGL : UniformBufferTest.DrawThenUpdateThenDraw/* = SKIP
 352085732 WIN INTEL D3D11 : SimpleStateChangeTest.DrawWithTextureTexSubImageThenDrawAgain/* = SKIP
 352085732 WIN INTEL D3D11 : SimpleStateChangeTest.UpdateTextureInUse/* = SKIP
+352085732 WIN INTEL VULKAN : GLSLTest_ES3.DynamicIndexingOfVectorOnRightSideOfLogicalOr/* = SKIP
 352085732 WIN INTEL VULKAN : MultiviewOcclusionQueryTest.OcclusionQueryOnlyLeftVisible/* = SKIP
 352085732 WIN INTEL VULKAN : MultiviewOcclusionQueryTest.OcclusionQueryOnlyRightVisible/* = SKIP
 352085732 WIN INTEL VULKAN : OcclusionQueriesTest.ClearNotCounted/* = SKIP
@@ -233,6 +236,8 @@
 352085732 WIN INTEL VULKAN : OcclusionQueriesTest.IsNotOccluded/* = SKIP
 352085732 WIN INTEL VULKAN : OcclusionQueriesTest.MultiContext/* = SKIP
 352085732 WIN INTEL VULKAN : OcclusionQueriesTest.MultiQueries/* = SKIP
+352085732 WIN INTEL VULKAN : OcclusionQueriesTestES3.DeleteFBOWithPendingQuery/* = SKIP
+352085732 WIN INTEL VULKAN : OcclusionQueriesTestES3.UnbindFBOWithPendingQuery/* = SKIP
 373818282 WIN INTEL OPENGL : ClearTest.ChangeFramebufferAttachmentFromRGBAtoRGB/* = SKIP
 388144480 WIN INTEL VULKAN : OcclusionQueriesTest.WrongSkippedQuery/* = SKIP
 478807229 WIN INTEL VULKAN : OcclusionQueriesTestES3.QueryReuseWithMultipleFBOs/* = SKIP
@@ -288,6 +293,7 @@
 379758210 LINUX INTEL OPENGL : GLSLTest_ES3.SwizzledToBoolCoercion/* = SKIP
 437259106 LINUX INTEL : EGLDisplayTest.ContextLeakAfterTerminate/* = SKIP
 448675904 LINUX INTEL OPENGL : GLSLTestLoops.ForContinueInSwitchComplex/* = SKIP
+537235696 LINUX INTEL OPENGL : ClipDistance*.ThreeClipDistancesRedeclaredAndPassedToFunction/* = SKIP
 
 //Angle has bugs for sampler validation
 401546698 : TextureCubeTest.CubeMapBug2/* = SKIP
@@ -337,10 +343,16 @@
 491363839 NVIDIA VULKAN : GLSLTest_ES31.HelperInvocationsAfterDiscard/* = SKIP
 // Test cannot run when ASTC is emulated
 525079760 NVIDIA VULKAN : ImageTestES3.NonZeroLevel*GetCompressedTexImage/* = SKIP
-
-// Nvidia Vulkan
+536046166 NVIDIA VULKAN : FramebufferTest_ES31.MultisampleResolveWithBlitIntoMixedTextures/* = SKIP
+536046166 NVIDIA VULKAN : FramebufferTest_ES31.MultisampleResolveWithBlitIntoMixedTexturesAfterFinish/* = SKIP
+536046166 NVIDIA VULKAN : FramebufferTest_ES31_MSAA.MultisampleResolveWithBlitIntoMixedTextures/* = SKIP
+536046166 NVIDIA VULKAN : FramebufferTest_ES31_MSAA.MultisampleStencilSampling/*EmulatedPrerotation* = SKIP
+// NVIDIA's glCopyImageSubData may be broken
+534923522 NVIDIA OPENGL : Texture2DTestES3_NonZeroBaseLevelGenMipmaps.VerifyMipmapContents/* = SKIP
+534923522 NVIDIA GLES : Texture2DTestES3_NonZeroBaseLevelGenMipmaps.VerifyMipmapContents/* = SKIP
 42265709 NVIDIA VULKAN : GLSLTest_ES31.TessellationControlShaderMatrixCopyBug/* = SKIP
 42265709 NVIDIA VULKAN : GLSLTest_ES31.TessellationControlShaderMatrixMultiplicationBug/* = SKIP
+537235696 NVIDIA OPENGL : ClipDistance*.ThreeClipDistancesRedeclaredAndPassedToFunction/* = SKIP
 
 // Intel Vulkan
 
@@ -381,6 +393,10 @@
 40096893 LINUX INTEL VULKAN : TextureBufferTestES31.TexBufferFormatMismatch/* = SKIP
 // RobustBufferAccess is not actually robust (will hang).
 435228814 LINUX INTEL VULKAN : RobustBufferAccessBehaviorTest.DynamicBufferCrash/* = SKIP
+536046166 INTEL VULKAN : FramebufferTest_ES31.MultisampleResolveWithBlitIntoMixedTextures/* = SKIP
+536046166 INTEL VULKAN : FramebufferTest_ES31.MultisampleResolveWithBlitIntoMixedTexturesAfterFinish/* = SKIP
+536046166 INTEL VULKAN : FramebufferTest_ES31_MSAA.MultisampleResolveWithBlitIntoMixedTextures/* = SKIP
+536046166 WIN INTEL VULKAN : FramebufferTest_ES31_MSAA.MultisampleStencilSampling/*EmulatedPrerotation* = SKIP
 
 // Robust init of OOB framebuffer reads is not zero'd
 500528706 VULKAN : CopyTexImageTestRobustResourceInit.OOBReadShouldBeZeroInit/* = SKIP
@@ -415,6 +431,7 @@
 40644829 MAC NVIDIA METAL : GLSLTest_ES3.DynamicIndexingOfSwizzledLValuesShouldWork/* = SKIP
 40644829 MAC NVIDIA METAL : GLSLTest_ES3.WriteIntoDynamicIndexingOfSwizzledVector/* = SKIP
 40644830 MAC NVIDIA METAL : PointSpritesTest.PointCoordRegressionTest/* = SKIP
+538488445 MAC INTEL METAL : GLSLTest_ES3.DynamicIndexingOfVectorOnRightSideOfLogicalOr/* = SKIP
 40644837 MAC INTEL METAL : UniformBlockWithOneLargeArrayMemberTest.MemberTypeIsMatrix/* = SKIP
 40644837 MAC INTEL METAL : UniformBlockWithOneLargeArrayMemberTest.MemberTypeIsMatrixAndInstanced/* = SKIP
 40644837 MAC INTEL METAL : UniformBlockWithOneLargeArrayMemberTest.MemberTypeIsMatrixAndRowMajorQualifier/* = SKIP
@@ -454,6 +471,8 @@
 515709506 MAC METAL : DrawBaseVertexBaseInstanceTest_ES3.BaseInstanceSmallDivisorClientMemory/* = SKIP
 524008572 MAC METAL : VertexAttributeTestES3.LargeAttribPointerOffsetNoCrash/* = SKIP
 534815900 MAC METAL : TextureCubeTestES3.RedefinedCubemapLevelsOnlyFaceZeroCompatible/* = SKIP
+536936861 MAC METAL : ClipDistance*.ThreeClipDistancesRedeclaredAndPassedToFunction/* = SKIP
+537814733 MAC METAL : WebGLGLSLTest.FragDataIndexClampWithoutDrawBuffers/* = SKIP
 
 // The workaround is not intended to be enabled in this configuration so
 // skip it as the failure is likely a driver bug.
@@ -666,6 +685,7 @@
 42266171 PIXEL4ORXL GLES : FramebufferFetchES31.DrawNonFetchDrawFetchInStorageBuffer* = SKIP
 40096454 PIXEL4ORXL GLES : WebGL2GLSLTest.InitOutputParams/* = SKIP
 42266687 PIXEL4ORXL GLES : GLSLTest_ES3.ComplexConstructor/* = SKIP
+42266687 PIXEL4ORXL GLES : GLSLTest_ES3.StructConstructorComplexExpressionShortCircuit/* = SKIP
 42266774 PIXEL4ORXL GLES : MultithreadingTestES3.SimultaneousUploadAndDraw/* = SKIP
 384314370 PIXEL4ORXL GLES : FramebufferFetchES31.WriteOnlyInOutVariableConditional/* = SKIP
 384314370 PIXEL4ORXL GLES : FramebufferFetchES31.WriteOnlyInOutVariableConditionalFunctionCall/* = SKIP
@@ -673,6 +693,11 @@
 384314370 PIXEL4ORXL GLES : FramebufferFetchES31.WriteOnlyInOutVariableEarlyReturn/* = SKIP
 384314370 PIXEL4ORXL GLES : FramebufferFetchES31.WriteOnlyInOutVariablePartial/* = SKIP
 384314370 PIXEL4ORXL GLES : FramebufferFetchES31.WriteOnlyInOutVariableInOutArgument/* = SKIP
+536042538 PIXEL4ORXL GLES : FramebufferTest_ES31.MultisampleResolveWithBlitInto3DTexture/* = SKIP
+536042538 PIXEL4ORXL GLES : FramebufferTest_ES31.MultisampleResolveWithBlitIntoMixedTextures/* = SKIP
+536042538 PIXEL4ORXL GLES : FramebufferTest_ES31.MultisampleResolveWithBlitIntoMixedTexturesAfterFinish/* = SKIP
+536042538 PIXEL4ORXL GLES : FramebufferTest_ES31_MSAA.MultisampleResolveWithBlitInto3DTexture/* = SKIP
+536042538 PIXEL4ORXL GLES : FramebufferTest_ES31_MSAA.MultisampleResolveWithBlitIntoMixedTextures/* = SKIP
 42264513 PIXEL4ORXL GLES : GLSLTest.NestedInoutVars2/* = SKIP
 42264513 PIXEL4ORXL GLES : GLSLTest.NestedInoutVars3/* = SKIP
 42264513 PIXEL4ORXL GLES : SimpleUniformTestES3.TernarySelectAnArrayThenIndex/* = SKIP
@@ -756,6 +781,7 @@
 40096826 PIXEL6 VULKAN : FramebufferMultiviewLayeredClearTest.ScissoredClearBufferfi/* = SKIP
 40096826 PIXEL6 VULKAN : FramebufferTest_ES31.MultipleTextureMultisampleResolveWithBlitMultipleResolves* = SKIP
 40096826 PIXEL6 VULKAN : FramebufferTest_ES31.MultisampleResolveWithBlitThenDrawAttachment1/* = SKIP
+536046166 PIXEL6 VULKAN : FramebufferTest_ES31.MultisampleResolveWithBlitInto3DTexture/* = SKIP
 40096826 PIXEL6 VULKAN : GLSLTest.PointCoordConsistency/* = SKIP
 40096826 PIXEL6 VULKAN : GLSLTest_ES31.ArraysOfArraysImage/* = SKIP
 40096826 PIXEL6 VULKAN : GLSLTest_ES31.BoolInInterfaceBlocks/* = SKIP
@@ -954,6 +980,7 @@
 480069042 PIXEL10 GLES : FramebufferTest_ES31.DepthStencilResolveThenDrawWithoutResolve/* = SKIP
 480069042 PIXEL10 GLES : FramebufferTest_ES31.MixesMultisampleTextureRenderbuffer/* = SKIP
 480069042 PIXEL10 GLES : FramebufferTest_ES31.MultisampleDepthStencilResolveMultipleTimesWithDrawInBetween/* = SKIP
+536042538 PIXEL10 GLES : FramebufferTest_ES31.MultisampleResolveWithBlitInto3DTexture/* = SKIP
 379700129 PIXEL10 GLES : FramebufferTest_ES31_MSAA.MultisampleStencilSampling/* = SKIP
 480069042 PIXEL10 GLES : GLSLConstantFoldingTest_ES31.NamedArrayOfArrayIndex/* = SKIP
 480069042 PIXEL10 GLES : GLSLTest.NestedStructsWithSamplersAsFunctionArg/* = SKIP
@@ -962,6 +989,8 @@
 480069042 PIXEL10 GLES : GLSLTest_ES3.CompoundMultiplyMatrixValidNonSquareDimensions/* = SKIP
 480069042 PIXEL10 GLES : GLSLTest_ES3.DynamicIndexingOfSwizzledLValuesShouldWork2/* = SKIP
 533463991 PIXEL10 GLES : GLSLTest_ES3.LongIdentifiers/* = SKIP
+520464738 PIXEL10 GLES : GLSLTest_ES3.UniformBlockWithSupportedFieldsStructuredBuffer/* = SKIP
+520464738 PIXEL10 GLES : GLSLTest_ES3.UniformBlockWithUnsupportedFieldStructuredBufferFallback/* = SKIP
 480069042 PIXEL10 GLES : GLSLTest_ES3.VaryingAnonymousStructEquality/* = SKIP
 480069042 PIXEL10 GLES : GLSLTest_ES3.VaryingAnonymousStructWithInlineDefinition2/* = SKIP
 480069042 PIXEL10 GLES : GLSLTest_ES3.VaryingAnonymousStructWithInlineDefinition3/* = SKIP
@@ -1243,6 +1272,7 @@
 535213600 PIXEL10 GLES : PbufferTestES3.BindTexImageAndCopyTexSubTextureInvertedDst/* = SKIP
 535213600 PIXEL10 GLES : PbufferTestES3.BindTexImageAndCopyTextureInvertedSrc/* = SKIP
 535213600 PIXEL10 GLES : PbufferTestES3.BindTexImageAndCopyTextureSrc/* = SKIP
+537235694 PIXEL10 GLES : WebGLGLSLTest.FragDataIndexClampWithoutDrawBuffers/* = SKIP
 
 480069042 PIXEL10 VULKAN : ClearTextureEXTTestES31Unrenderable.Clear/ES3_1_Vulkan*__GL_RG16_SNORM_EXT_GL_RG_GL_SHORT_GL_TEXTURE_2D_ARRAY = SKIP
 480069042 PIXEL10 VULKAN : ClearTextureEXTTestES31Unrenderable.Clear/ES3_1_Vulkan*__GL_RGB32UI_GL_RGB_INTEGER_GL_UNSIGNED_INT_GL_TEXTURE_2D_ARRAY = SKIP
@@ -1255,6 +1285,7 @@
 480069042 PIXEL10 VULKAN : ExternalBufferTestES31.SubDataDoesNotCauseOrphaning/* = SKIP
 480069042 PIXEL10 VULKAN : ExternalBufferTestES31.getBufferParameter/* = SKIP
 480069042 PIXEL10 VULKAN : FramebufferTest_ES31.DepthStencilResolveThenDrawWithoutResolve/* = SKIP
+536046166 PIXEL10 VULKAN : FramebufferTest_ES31.MultisampleResolveWithBlitInto3DTexture/* = SKIP
 480069042 PIXEL10 VULKAN : GLSLTest_ES31.ArrayOfArrayOfSamplerDynamicIndexEXT/* = SKIP
 480069042 PIXEL10 VULKAN : GLSLTest_ES31.ArrayOfArrayOfSamplerDynamicIndexOES/* = SKIP
 480069042 PIXEL10 VULKAN : GLSLTest_ES31.ArrayOfArrayOfSamplerInStructDynamicIndex/* = SKIP
@@ -1406,17 +1437,8 @@
 375244081 IOS METAL : GLSLTest_ES3.MaxVaryingWithFeedbackAndGLline/* = SKIP
 496604559 IOS METAL : RobustResourceInitTestES3.DrawThenInvalidateThenVerifyDepthStencil/* = SKIP
 507904704 IOS METAL : CompressedTextureASTCTest.Test/* = SKIP
-507904704 IOS METAL : CompressedTextureEACR11STest.Test/* = SKIP
-507904704 IOS METAL : CompressedTextureEACR11UTest.Test/* = SKIP
-507904704 IOS METAL : CompressedTextureEACRG11STest.Test/* = SKIP
-507904704 IOS METAL : CompressedTextureEACRG11UTest.Test/* = SKIP
 507904704 IOS METAL : CompressedTextureETC1SubTest.Test/* = SKIP
-507904704 IOS METAL : CompressedTextureETC2RGB8A1SRGBTest.Test/* = SKIP
-507904704 IOS METAL : CompressedTextureETC2RGB8A1Test.Test/* = SKIP
-507904704 IOS METAL : CompressedTextureETC2RGB8SRGBTest.Test/* = SKIP
-507904704 IOS METAL : CompressedTextureETC2RGB8Test.Test/* = SKIP
-507904704 IOS METAL : CompressedTextureETC2RGBA8SRGBTest.Test/* = SKIP
-507904704 IOS METAL : CompressedTextureETC2RGBA8Test.Test/* = SKIP
+507904704 IOS METAL : CompressedTextureETC2Test.Test/* = SKIP
 507904704 IOS METAL : ETC1CompressedTextureTest.ETC1CompressedImageNPOT/* = SKIP
 507904704 IOS METAL : ETC1CompressedTextureTest.ETC1CompressedSubImage/* = SKIP
 507904704 IOS METAL : ETC1CompressedTextureTest.ETC1ShrinkThenGrowMaxLevels/* = SKIP
@@ -1596,6 +1618,8 @@
 
 42266092 WIN SWIFTSHADER : VulkanPerformanceCounterTest.EndXfbAfterRenderPassClosed/* = SKIP
 466331749 SWIFTSHADER : GLSLTest_ES31.ShortCircuitOutOfBoundsAccess/* = SKIP
+// Flakily reads NaN/-1 instead of zero from the images.
+524800809 SWIFTSHADER : TextureTestES31.FragmentShaderLoadUnboundImageUnits/* = SKIP
 
 // Flat shading bug with lighting
 42264726 VULKAN : LightsTest.FlatLitMesh/* = SKIP
@@ -1605,16 +1629,7 @@
 42265943 PIXEL4ORXL GLES : CompressedTextureASTCSliced3DTest.Test/* = SKIP
 42265943 PIXEL4ORXL GLES : CompressedTextureASTC3DTest.Test/* = SKIP
 42265943 PIXEL4ORXL GLES : CompressedTextureETC1SubTest.Test/* = SKIP
-42265943 PIXEL4ORXL GLES : CompressedTextureEACR11STest.Test/* = SKIP
-42265943 PIXEL4ORXL GLES : CompressedTextureEACR11UTest.Test/* = SKIP
-42265943 PIXEL4ORXL GLES : CompressedTextureEACRG11STest.Test/* = SKIP
-42265943 PIXEL4ORXL GLES : CompressedTextureEACRG11UTest.Test/* = SKIP
-42265943 PIXEL4ORXL GLES : CompressedTextureETC2RGB8A1SRGBTest.Test/* = SKIP
-42265943 PIXEL4ORXL GLES : CompressedTextureETC2RGB8A1Test.Test/* = SKIP
-42265943 PIXEL4ORXL GLES : CompressedTextureETC2RGB8SRGBTest.Test/* = SKIP
-42265943 PIXEL4ORXL GLES : CompressedTextureETC2RGB8Test.Test/* = SKIP
-42265943 PIXEL4ORXL GLES : CompressedTextureETC2RGBA8SRGBTest.Test/* = SKIP
-42265943 PIXEL4ORXL GLES : CompressedTextureETC2RGBA8Test.Test/* = SKIP
+42265943 PIXEL4ORXL GLES : CompressedTextureETC2Test.Test/* = SKIP
 
 // Intel drivers erroneously reject certain sub-image uploads
 42265943 WIN INTEL OPENGL : CompressedTextureDXT1Test.Test/* = SKIP
@@ -1624,16 +1639,7 @@
 42265943 WIN INTEL OPENGL : CompressedTextureRGTCTest.Test/* = SKIP
 42265943 WIN INTEL OPENGL : CompressedTextureBPTCTest.Test/* = SKIP
 42265943 WIN INTEL OPENGL : CompressedTextureETC1SubTest.Test/* = SKIP
-42265943 WIN INTEL OPENGL : CompressedTextureEACR11STest.Test/* = SKIP
-42265943 WIN INTEL OPENGL : CompressedTextureEACR11UTest.Test/* = SKIP
-42265943 WIN INTEL OPENGL : CompressedTextureEACRG11STest.Test/* = SKIP
-42265943 WIN INTEL OPENGL : CompressedTextureEACRG11UTest.Test/* = SKIP
-42265943 WIN INTEL OPENGL : CompressedTextureETC2RGB8A1SRGBTest.Test/* = SKIP
-42265943 WIN INTEL OPENGL : CompressedTextureETC2RGB8A1Test.Test/* = SKIP
-42265943 WIN INTEL OPENGL : CompressedTextureETC2RGB8SRGBTest.Test/* = SKIP
-42265943 WIN INTEL OPENGL : CompressedTextureETC2RGB8Test.Test/* = SKIP
-42265943 WIN INTEL OPENGL : CompressedTextureETC2RGBA8SRGBTest.Test/* = SKIP
-42265943 WIN INTEL OPENGL : CompressedTextureETC2RGBA8Test.Test/* = SKIP
+42265943 WIN INTEL OPENGL : CompressedTextureETC2Test.Test/* = SKIP
 
 // Takes several minutes to complete with ASAN / TSAN
 42263997 ASAN VULKAN SWIFTSHADER : ClipCullDistanceTest.SizeCheckCombined/* = SKIP
@@ -1957,6 +1963,9 @@
 511737097 SAMSUNG GALAXYS24EXYNOS VULKAN : StateChangeTestES3.PrimitiveRestartWithUnsignedBytesIndexBufferUpdates/ES3_Vulkan_NoUsePrimitiveRestartEnableDynamicState = SKIP
 522843204 SAMSUNG GALAXYS24EXYNOS VULKAN : VulkanImageTest.*/*ForceFallbackFormat* = SKIP
 522843204 SAMSUNG GALAXYS24EXYNOS VULKAN : VulkanRGB565Test.*/*ForceFallbackFormat* = SKIP
+536046166 SAMSUNG GALAXYS24EXYNOS VULKAN : FramebufferTest_ES31.MultisampleResolveWithBlitInto3DTexture/* = SKIP
+536046166 SAMSUNG GALAXYS24EXYNOS VULKAN : FramebufferTest_ES31.MultisampleResolveWithBlitIntoMixedTextures/* = SKIP
+536046166 SAMSUNG GALAXYS24EXYNOS VULKAN : FramebufferTest_ES31.MultisampleResolveWithBlitIntoMixedTexturesAfterFinish/* = SKIP
 
 // Additional Xclipse failures on latest public
 410630704 SAMSUNG GALAXYS24EXYNOS GLES : AdvancedBlendTest.AdvancedBlendDisabledAndThenEnabledKHR/* = SKIP
@@ -2280,10 +2289,13 @@
 // WebGPU failures
 // Flakily causes test timeout issues on Linux/NVIDIA
 517972806 WGPU LINUX NVIDIA : * = SKIP
+// Device lock up on Mac/AMD
+538326435 WGPU MAC AMD : * = SKIP
 // BasicUniformUsage tests fail too frequently with WGPU
 376553328 LINUX INTEL WGPU : BasicUniformUsageTest.* = SKIP
 // Can't use a uniform struct outside of uniform address space.
 376553328 WGPU : SimpleUniformTestES3.UseUniformStructOutsideOfUniformAddressSpace/* = SKIP
+520464738 WGPU : GLSLTest.ParameterWithNoName/* = SKIP
 42267012 WGPU : ClearTest.ChangeFramebufferAttachmentFromRGBAtoRGB* = SKIP
 42267012 WGPU : ClearTestES3.TextureArrayRGB8/* = SKIP
 42267012 WGPU : ClearTestES3.ClearAndReadPixels3DTexture/* = SKIP
@@ -2396,6 +2408,7 @@
 42267100 WGPU : GLSLTest.FragCoordConsistency/* = SKIP
 42267100 WGPU : GLSLTest.FragData/* = SKIP
 42267100 WGPU : GLSLTest.FragData_AlphaToCoverage/* = SKIP
+42267100 WGPU : WebGLGLSLTest.FragDataIndexClampWithoutDrawBuffers/* = SKIP
 42267100 WGPU : GLSLTest.SeparateStructDeclaratorStructInStruct/* = SKIP
 42267100 WGPU : GLSLTest.ConstructorinSequenceOperator/* = SKIP
 42267100 WGPU : GLSLTest.VectorAndMatrixScalarizationDoesNotAffectRendering/* = SKIP

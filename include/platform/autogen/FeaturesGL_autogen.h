@@ -260,6 +260,18 @@ struct FeaturesGL : FeatureSetBase
         &members,
     };
 
+    FeatureInfo recreateImmutableTextureOnBaseLevelIncrease = {
+        "recreateImmutableTextureOnBaseLevelIncrease",
+        FeatureCategory::OpenGLWorkarounds,
+        &members,
+    };
+
+    FeatureInfo useTempForNonZeroBaseLevelGenMipmapUsingCopyImageSubData = {
+        "useTempForNonZeroBaseLevelGenMipmapUsingCopyImageSubData",
+        FeatureCategory::OpenGLWorkarounds,
+        &members,
+    };
+
     FeatureInfo limitMax3dArrayTextureSizeTo1024 = {
         "limitMax3dArrayTextureSizeTo1024",
         FeatureCategory::OpenGLWorkarounds,
@@ -724,6 +736,18 @@ struct FeaturesGL : FeatureSetBase
 
     FeatureInfo limitOutputVaryingsTo256AtCompileTime = {
         "limitOutputVaryingsTo256AtCompileTime",
+        FeatureCategory::OpenGLWorkarounds,
+        &members,
+    };
+
+    FeatureInfo avoidComplexExpressionsInStructConstructor = {
+        "avoidComplexExpressionsInStructConstructor",
+        FeatureCategory::OpenGLWorkarounds,
+        &members,
+    };
+
+    FeatureInfo flushQueriesBeforeDeletingOrUnbindingFbo = {
+        "flushQueriesBeforeDeletingOrUnbindingFbo",
         FeatureCategory::OpenGLWorkarounds,
         &members,
     };

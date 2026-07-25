@@ -2972,7 +2972,7 @@ angle::Result DynamicBuffer::allocateNewBuffer(ErrorContext *context)
 {
     // Allocate the buffer
     ASSERT(!mBuffer);
-    mBuffer = std::make_unique<BufferHelper>();
+    RendererScoped<BufferHelper> buffer(context->getRenderer());
 
     VkBufferCreateInfo createInfo    = {};
     createInfo.sType                 = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -2983,11 +2983,19 @@ angle::Result DynamicBuffer::allocateNewBuffer(ErrorContext *context)
     createInfo.queueFamilyIndexCount = 0;
     createInfo.pQueueFamilyIndices   = nullptr;
 
-    return mBuffer->init(context, createInfo, mMemoryPropertyFlags);
+    ANGLE_TRY(buffer.get().init(context, createInfo, mMemoryPropertyFlags));
+
+    mBuffer = std::make_unique<BufferHelper>(buffer.release());
+    return angle::Result::Continue;
 }
 
 bool DynamicBuffer::allocateFromCurrentBuffer(size_t sizeInBytes, BufferHelper **bufferHelperOut)
 {
+    if (mBuffer == nullptr)
+    {
+        return false;
+    }
+
     mNextAllocationOffset =
         roundUp<uint32_t>(mNextAllocationOffset, static_cast<uint32_t>(mAlignment));
 
@@ -3670,6 +3678,15 @@ void DescriptorPoolHelper::cleanupPendingGarbage()
     }
 }
 
+void DescriptorPoolHelper::forceFinishPendingGarbage()
+{
+    while (!mPendingGarbageList.empty())
+    {
+        mFinishedGarbageList.push_back(std::move(mPendingGarbageList.front()));
+        mPendingGarbageList.pop_front();
+    }
+}
+
 bool DescriptorPoolHelper::recycleFromGarbage(Renderer *renderer,
                                               DescriptorSetPointer *descriptorSetOut)
 {
@@ -3792,7 +3809,11 @@ void DynamicDescriptorPool::destroy(VkDevice device)
 
     for (DescriptorPoolPointer &pool : mDescriptorPools)
     {
-        pool->cleanupPendingGarbage();
+        // Usually all pending garbage should have been finished when DynamicDescriptorPool is
+        // destroyed. But when context runs into error and submit code path early out, we could have
+        // unfinished garbage in the pending list. So force all pending garbage to be cleared rather
+        // than being left in place until the pool itself is deleted.
+        pool->forceFinishPendingGarbage();
         pool->destroyGarbage();
         ASSERT(pool.unique());
     }
@@ -6422,8 +6443,7 @@ angle::Result ImageHelper::initializeNonZeroMemory(ErrorContext *context,
 VkResult ImageHelper::initMemory(ErrorContext *context,
                                  VkMemoryPropertyFlags flags,
                                  VkMemoryPropertyFlags excludedFlags,
-                                 const VkMemoryRequirements *memoryRequirements,
-                                 const bool allocateDedicatedMemory,
+                                 VkMemoryRequirements *memoryRequirements,
                                  MemoryAllocationType allocationType,
                                  VkMemoryPropertyFlags *flagsOut,
                                  VkDeviceSize *sizeOut)
@@ -6433,6 +6453,8 @@ VkResult ImageHelper::initMemory(ErrorContext *context,
     // To allocate memory here, if possible, we use the image memory suballocator which uses VMA.
     ASSERT(excludedFlags < VK_MEMORY_PROPERTY_FLAG_BITS_MAX_ENUM);
     Renderer *renderer = context->getRenderer();
+    bool allocateDedicatedMemory =
+        renderer->getImageMemorySuballocator().needsDedicatedMemory(memoryRequirements->size);
 
     // First try allocate tile memory if requested
     ASSERT(!mDeviceMemory.valid());
@@ -6447,8 +6469,21 @@ VkResult ImageHelper::initMemory(ErrorContext *context,
         else
         {
             ASSERT(renderer->getFeatures().simulateTileMemoryForTesting.enabled);
-            AllocateImageMemory(context, mMemoryAllocationType, flags, flagsOut, nullptr, &mImage,
-                                &mMemoryTypeIndex, &mDeviceMemory, &mAllocationSize);
+            // For testing purpose, we cap the tile memory allocation size to 64M. If exceed, we
+            // force allocation to fail so that the allocation failure path also get testing
+            // coverage.
+            bool simulateAllocationFailure = memoryRequirements->size > 64ull * 1024ull * 1024ull;
+            if (simulateAllocationFailure)
+            {
+                ASSERT(!mDeviceMemory.valid());
+                WARN() << "Simulating tile memory allocation failed for image "
+                       << mImage.getHandle();
+            }
+            else
+            {
+                AllocateImageMemory(context, mMemoryAllocationType, flags, flagsOut, nullptr,
+                                    &mImage, &mMemoryTypeIndex, &mDeviceMemory, &mAllocationSize);
+            }
         }
 
         if (mDeviceMemory.valid())
@@ -6457,7 +6492,25 @@ VkResult ImageHelper::initMemory(ErrorContext *context,
         }
         else
         {
+            INFO() << "tile memory allocation failed for image " << mImage.getHandle();
+            // Tile-memory allocation failed. The tile-memory image was created without transfer
+            // usage. So recreate the VkImage with the originally requested usage before falling
+            // back to regular memory below.
+            VkImageCreateInfo imageCreateInfo = mVkImageCreateInfo;
+            imageCreateInfo.usage             = mRequestedUsage;
+            Image newImage;
+            VK_RESULT_TRY(newImage.init(context->getDevice(), imageCreateInfo));
+
+            mImage.destroy(renderer->getDevice());
+            mImage             = std::move(newImage);
+            mVkImageCreateInfo = imageCreateInfo;
+            mImageSerial       = renderer->getResourceSerialFactory().generateImageSerial();
             mUseTileMemory = false;
+
+            // memory requirements may have changed
+            mImage.getMemoryRequirements(renderer->getDevice(), memoryRequirements);
+            allocateDedicatedMemory = renderer->getImageMemorySuballocator().needsDedicatedMemory(
+                memoryRequirements->size);
         }
     }
 
@@ -6510,12 +6563,9 @@ angle::Result ImageHelper::initMemoryAndNonZeroFillIfNeeded(
     // Get memory requirements for the allocation.
     VkMemoryRequirements memoryRequirements;
     mImage.getMemoryRequirements(renderer->getDevice(), &memoryRequirements);
-    bool allocateDedicatedMemory =
-        renderer->getImageMemorySuballocator().needsDedicatedMemory(memoryRequirements.size);
 
-    ANGLE_VK_TRY(context,
-                 initMemory(context, flags, 0, &memoryRequirements, allocateDedicatedMemory,
-                            allocationType, &outputFlags, &outputSize));
+    ANGLE_VK_TRY(context, initMemory(context, flags, 0, &memoryRequirements, allocationType,
+                                     &outputFlags, &outputSize));
 
     // Memory can only be non-zero initialized if the TRANSFER_DST usage is set.  This is normally
     // the case, but not with |initImplicitMultisampledRenderToTexture| which creates a
@@ -6601,13 +6651,12 @@ angle::Result ImageHelper::fallbackFromTileMemory(ContextVk *contextVk)
     // reallocate device memory.
     VkMemoryRequirements memoryRequirements;
     mImage.getMemoryRequirements(renderer->getDevice(), &memoryRequirements);
-    bool allocateDedicatedMemory =
-        renderer->getImageMemorySuballocator().needsDedicatedMemory(memoryRequirements.size);
+
     VkMemoryPropertyFlags memoryPropertyFlagsOut;
     VkDeviceSize deviceMemorySizeOut;
     ANGLE_VK_TRY(contextVk, initMemory(contextVk, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0x0,
-                                       &memoryRequirements, allocateDedicatedMemory, allocationType,
-                                       &memoryPropertyFlagsOut, &deviceMemorySizeOut));
+                                       &memoryRequirements, allocationType, &memoryPropertyFlagsOut,
+                                       &deviceMemorySizeOut));
 
     // Copy data from the previous image.
     if (prevImage->isVkImageContentDefined())
