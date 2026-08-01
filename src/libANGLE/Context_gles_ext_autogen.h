@@ -36,6 +36,7 @@
     /* GL_OES_point_sprite */                                                                      \
     /* GL_OES_query_matrix */                                                                      \
     GLbitfield queryMatrixx(GLfixed *mantissa, GLint *exponent);                                   \
+    /* GL_OES_stencil8 */                                                                          \
     /* GL_OES_texture_cube_map */                                                                  \
     void getTexGenfv(GLenum coord, GLenum pname, GLfloat *params);                                 \
     void getTexGeniv(GLenum coord, GLenum pname, GLint *params);                                   \
@@ -622,7 +623,6 @@
                         GLint xoffset, GLint yoffset, GLint x, GLint y, GLint width, GLint height, \
                         GLboolean unpackFlipY, GLboolean unpackPremultiplyAlpha,                   \
                         GLboolean unpackUnmultiplyAlpha);                                          \
-    /* GL_CHROMIUM_framebuffer_mixed_samples */                                                    \
     /* GL_CHROMIUM_lose_context */                                                                 \
     void loseContext(GraphicsResetStatus currentPacked, GraphicsResetStatus otherPacked);
 

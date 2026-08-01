@@ -222,12 +222,7 @@ angle_linux_parent_builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "android_clang",
-            "android_static_analysis",
-            "arm64",
-            "capture",
-            "opencl",
-            "release_with_dchecks",
+            "android_arm64_builder_rel",
         ],
     ),
     console_view_entry = consoles.console_view_entry(
@@ -358,12 +353,7 @@ angle_linux_parent_builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "capture",
-            "component",
-            "linux_clang",
-            "opencl",
-            "release_with_dchecks",
-            "x64",
+            "linux_x64_builder_rel",
         ],
     ),
     console_view_entry = consoles.console_view_entry(
@@ -422,11 +412,7 @@ angle_mac_parent_builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "arm64",
-            "capture",
-            "component",
-            "mac_clang",
-            "release_with_dchecks",
+            "mac_arm64_builder_rel",
         ],
     ),
     console_view_entry = consoles.console_view_entry(
@@ -488,11 +474,7 @@ angle_mac_parent_builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "capture",
-            "component",
-            "mac_clang",
-            "release_with_dchecks",
-            "x64",
+            "mac_x64_builder_rel",
         ],
     ),
     console_view_entry = consoles.console_view_entry(
@@ -721,12 +703,7 @@ angle_win_parent_builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "capture",
-            "component",
-            "opencl",
-            "release_with_dchecks",
-            "win_clang",
-            "x64",
+            "win_x64_builder_rel",
         ],
     ),
     console_view_entry = consoles.console_view_entry(
@@ -2203,20 +2180,35 @@ ci.thin_tester(
         run_tests_serially = True,
     ),
     targets = targets.bundle(
-        targets = [],
+        targets = [
+            "common_isolated_scripts",
+            "win_common_gtests",
+            "win_nvidia_only_gtests",
+        ],
         mixins = [
             "win10_nvidia_gtx_1660_experimental",
         ],
+        per_test_modifications = {
+            "angle_end2end_tests": targets.per_test_modification(
+                mixins = targets.mixin(
+                    args = [
+                        # anglebug.com/539554093 suspecting test timeout caused
+                        # by conflicting tests.
+                        "--max-processes=2",
+                    ],
+                ),
+            ),
+        },
     ),
     targets_settings = targets.settings(
         browser_config = targets.browser_config.RELEASE,
         os_type = targets.os_type.WINDOWS,
     ),
     # Uncomment this entry when this experimental tester is actually in use.
-    # console_view_entry = consoles.console_view_entry(
-    #     category = "test|win|x64|rel|exp",
-    #     short_name = "1660",
-    # ),
+    console_view_entry = consoles.console_view_entry(
+        category = "test|win|x64|rel|exp",
+        short_name = "1660",
+    ),
     list_view = "exp",
 )
 

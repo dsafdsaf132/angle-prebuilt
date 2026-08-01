@@ -10,6 +10,8 @@
 
 // Color.inc : Inline definitions of some functions from Color.h
 
+#include <compare>
+
 namespace angle
 {
 
@@ -26,10 +28,11 @@ constexpr Color<T>::Color(T r, T g, T b, T a) : red(r), green(g), blue(b), alpha
 template <typename T>
 bool operator==(const Color<T> &a, const Color<T> &b)
 {
-    return a.red == b.red &&
-           a.green == b.green &&
-           a.blue == b.blue &&
-           a.alpha == b.alpha;
+    // Use std::strong_order so that NaN values compare as equal and -0 and +0 are different.
+    return std::strong_order(a.red, b.red) == std::strong_ordering::equal &&
+           std::strong_order(a.green, b.green) == std::strong_ordering::equal &&
+           std::strong_order(a.blue, b.blue) == std::strong_ordering::equal &&
+           std::strong_order(a.alpha, b.alpha) == std::strong_ordering::equal;
 }
 
 template <typename T>
@@ -38,6 +41,12 @@ bool operator!=(const Color<T> &a, const Color<T> &b)
     return !(a == b);
 }
 
+template <typename T>
+std::ostream &operator<<(std::ostream &os, const Color<T> &color)
+{
+    os << "r = " << color.red << ", g = " << color.green << ", b = " << color.blue << ", a = " << color.alpha;
+    return os;
+}
 
 ColorGeneric::ColorGeneric() : colorF(), type(Type::Float) {}
 

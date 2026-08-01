@@ -227,7 +227,6 @@ using data from registry_xml.py and gl.xml.
 | [GL_CHROMIUM_copy_texture](https://chromium.googlesource.com/angle/angle/+/refs/heads/main/extensions/CHROMIUM_copy_texture.txt) | &#x2714; | &#x2714; | &#x2714; | &#x2714; | &#x2714; | &#x2714; | &#x2714; |
 | [GL_ANGLE_copy_texture_3d](https://chromium.googlesource.com/angle/angle/+/refs/heads/main/extensions/ANGLE_copy_texture_3d.txt) | &#x2714; | &#x2714; | &#x2714; | &#x2714; | &#x2714; | &#x2714; | &#x2714; |
 | [GL_ANGLE_explicit_context](https://chromium.googlesource.com/angle/angle/+/refs/heads/main/extensions/ANGLE_explicit_context.txt) |  |  |  |  |  |  |  |
-| [GL_CHROMIUM_framebuffer_mixed_samples](https://chromium.googlesource.com/angle/angle/+/refs/heads/main/extensions/CHROMIUM_framebuffer_mixed_samples.txt) |  |  |  |  |  |  |  |
 | [GL_ANGLE_framebuffer_multisample](https://chromium.googlesource.com/angle/angle/+/refs/heads/main/extensions/ANGLE_framebuffer_multisample.txt) | &#x2714; | &#x2714; | &#x2714; | &#x2714; | &#x2714; | &#x2714; | &#x2714; |
 | [GL_ANGLE_get_image](https://chromium.googlesource.com/angle/angle/+/refs/heads/main/extensions/ANGLE_get_image.txt) | &#x2714; | &#x2714; | &#x2714; | &#x2714; | &#x2714; | &#x2714; | &#x2714; |
 | [GL_ANGLE_get_serialized_context_string](https://chromium.googlesource.com/angle/angle/+/refs/heads/main/extensions/ANGLE_get_serialized_context_string.txt) | &#x2714; | &#x2714; | &#x2714; | &#x2714; | &#x2714; | &#x2714; | &#x2714; |
@@ -276,6 +275,7 @@ using data from registry_xml.py and gl.xml.
 | [GL_OES_point_size_array](https://khronos.org/registry/OpenGL/extensions/OES/OES_point_size_array.txt) | &#x2714; |
 | [GL_OES_point_sprite](https://khronos.org/registry/OpenGL/extensions/OES/OES_point_sprite.txt) | &#x2714; |
 | [GL_OES_query_matrix](https://khronos.org/registry/OpenGL/extensions/OES/OES_query_matrix.txt) |  |
+| [GL_OES_stencil8](https://khronos.org/registry/OpenGL/extensions/OES/OES_stencil8.txt) |  |
 | [GL_OES_texture_cube_map](https://khronos.org/registry/OpenGL/extensions/OES/OES_texture_cube_map.txt) | &#x2714; |
 | [GL_EXT_texture_lod_bias](https://khronos.org/registry/OpenGL/extensions/EXT/EXT_texture_lod_bias.txt) |  |
 | [GL_OES_texture_mirrored_repeat](https://khronos.org/registry/OpenGL/extensions/OES/OES_texture_mirrored_repeat.txt) |  |

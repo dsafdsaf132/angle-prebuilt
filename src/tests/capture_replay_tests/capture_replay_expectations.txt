@@ -260,6 +260,7 @@
 # VVL error
 42264614 LINUX : VulkanExternalImageTestES31.UninitializedOnGLImportAndStorageWrite/* = SKIP_FOR_CAPTURE
 42264614 LINUX : VulkanExternalImageTest.NonRenderableWithFlags/* = SKIP_FOR_CAPTURE
+540256225 : ImageTestES3.SourceYUVTextureTargetExternalRGBSample/* = SKIP_FOR_CAPTURE
 
 # CoherentBufferTracker deadlocks and flaky crashes
 42266529 LINUX : BufferDataTestES3.* = SKIP_FOR_CAPTURE
@@ -285,3 +286,6 @@
 
 # Crashes on win and linux trace bots
 372059358 : MultisampleTestES3.CopyTexImage2DFromMsaaDefaultFbo/* = SKIP_FOR_CAPTURE
+
+# Fails on win and linux trace bots
+499602793 : Texture2DArrayTestES3_ReattachTextureToFbo.IncreaseLayersWithFramebufferAttachedMultiContext/* = SKIP_FOR_CAPTURE

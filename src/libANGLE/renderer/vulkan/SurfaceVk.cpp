@@ -229,7 +229,7 @@ angle::Result InitImageHelper(DisplayVk *displayVk,
     ANGLE_TRY(imageHelper->initExternal(
         displayVk, gl::TextureType::_2D, extents, vkFormat.getIntendedFormatID(),
         renderableFormatId, samples, usage, imageCreateFlags, vk::ImageAccess::Undefined, nullptr,
-        gl::LevelIndex(0), 1, 1, isRobustResourceInitEnabled, hasProtectedContent,
+        gl::SourceLevel::Zero(), 1, 1, isRobustResourceInitEnabled, hasProtectedContent,
         vk::TileMemory::Prohibited, vk::YcbcrConversionDesc{}, nullptr,
         vk::ImageFormatReinterpretability::ColorspaceOverrides));
 
@@ -310,11 +310,12 @@ angle::Result LockSurfaceImpl(DisplayVk *displayVk,
     {
         if (preservePixels)
         {
-            gl::LevelIndex sourceLevelGL(0);
+            const gl::SourceLevel sourceLevelGL = gl::SourceLevel::Zero();
+            const gl::SourceLayer sourceLayer   = gl::SourceLayer::Zero();
             const VkClearColorValue *clearColor;
             if (image->removeStagedClearUpdatesAndReturnColor(sourceLevelGL, &clearColor))
             {
-                ASSERT(!image->hasStagedUpdatesForSubresource(sourceLevelGL, 0, 1));
+                ASSERT(!image->hasStagedUpdatesForSubresource(sourceLevelGL, sourceLayer, 1));
                 angle::Color<uint8_t> color((uint8_t)(clearColor->float32[0] * 255.0),
                                             (uint8_t)(clearColor->float32[1] * 255.0),
                                             (uint8_t)(clearColor->float32[2] * 255.0),
@@ -323,8 +324,8 @@ angle::Result LockSurfaceImpl(DisplayVk *displayVk,
             }
             else
             {
-                gl::Box sourceArea(0, 0, 0, width, height, 1);
-                ANGLE_TRY(image->copySurfaceImageToBuffer(displayVk, sourceLevelGL, 1, 0,
+                const gl::Box sourceArea(0, 0, 0, width, height, 1);
+                ANGLE_TRY(image->copySurfaceImageToBuffer(displayVk, sourceLevelGL, 1, sourceLayer,
                                                           sourceArea, &lockBufferHelper));
             }
         }
@@ -346,10 +347,11 @@ angle::Result UnlockSurfaceImpl(DisplayVk *displayVk,
     {
         ASSERT(image->valid());
 
-        gl::Box destArea(0, 0, 0, width, height, 1);
-        gl::LevelIndex destLevelGL(0);
+        const gl::Box destArea(0, 0, 0, width, height, 1);
+        const gl::SourceLevel destLevelGL = gl::SourceLevel::Zero();
+        const gl::SourceLayer destLayer   = gl::SourceLayer::Zero();
 
-        ANGLE_TRY(image->copyBufferToSurfaceImage(displayVk, destLevelGL, 1, 0, destArea,
+        ANGLE_TRY(image->copyBufferToSurfaceImage(displayVk, destLevelGL, 1, destLayer, destArea,
                                                   &lockBufferHelper));
     }
 
@@ -688,10 +690,11 @@ OffscreenSurfaceVk::OffscreenSurfaceVk(const egl::SurfaceState &surfaceState,
     : SurfaceVk(surfaceState), mColorAttachment(this), mDepthStencilAttachment(this)
 {
     mColorRenderTarget.init(&mColorAttachment.image, &mColorAttachment.imageViews, nullptr, nullptr,
-                            gl::LevelIndex(0), 0, 1, RenderTargetTransience::Default);
-    mDepthStencilRenderTarget.init(&mDepthStencilAttachment.image,
-                                   &mDepthStencilAttachment.imageViews, nullptr, nullptr,
-                                   gl::LevelIndex(0), 0, 1, RenderTargetTransience::Default);
+                            gl::SourceLevel::Zero(), gl::SourceLayer::Zero(), 1,
+                            RenderTargetTransience::Default);
+    mDepthStencilRenderTarget.init(
+        &mDepthStencilAttachment.image, &mDepthStencilAttachment.imageViews, nullptr, nullptr,
+        gl::SourceLevel::Zero(), gl::SourceLayer::Zero(), 1, RenderTargetTransience::Default);
 }
 
 OffscreenSurfaceVk::~OffscreenSurfaceVk() {}
@@ -735,7 +738,8 @@ angle::Result OffscreenSurfaceVk::initializeImpl(DisplayVk *displayVk)
                                               renderer->getFormat(config->renderTargetFormat),
                                               samples, robustInit, mState.hasProtectedContent()));
         mColorRenderTarget.init(&mColorAttachment.image, &mColorAttachment.imageViews, nullptr,
-                                nullptr, gl::LevelIndex(0), 0, 1, RenderTargetTransience::Default);
+                                nullptr, gl::SourceLevel::Zero(), gl::SourceLayer::Zero(), 1,
+                                RenderTargetTransience::Default);
     }
 
     if (config->depthStencilFormat != GL_NONE)
@@ -743,9 +747,9 @@ angle::Result OffscreenSurfaceVk::initializeImpl(DisplayVk *displayVk)
         ANGLE_TRY(mDepthStencilAttachment.initialize(
             displayVk, mWidth, mHeight, renderer->getFormat(config->depthStencilFormat), samples,
             robustInit, mState.hasProtectedContent()));
-        mDepthStencilRenderTarget.init(&mDepthStencilAttachment.image,
-                                       &mDepthStencilAttachment.imageViews, nullptr, nullptr,
-                                       gl::LevelIndex(0), 0, 1, RenderTargetTransience::Default);
+        mDepthStencilRenderTarget.init(
+            &mDepthStencilAttachment.image, &mDepthStencilAttachment.imageViews, nullptr, nullptr,
+            gl::SourceLevel::Zero(), gl::SourceLayer::Zero(), 1, RenderTargetTransience::Default);
     }
 
     return angle::Result::Continue;
@@ -838,7 +842,7 @@ angle::Result OffscreenSurfaceVk::initializeContents(const gl::Context *context,
                                                      GLenum binding,
                                                      const gl::OwnImageIndex &ownImageIndex)
 {
-    const gl::ImageIndex imageIndex = ownImageIndex.getUntranslated();
+    const gl::SourceImageIndex imageIndex = mState.toSourceIndex(ownImageIndex);
 
     ContextVk *contextVk = vk::GetImpl(context);
 
@@ -1067,9 +1071,11 @@ WindowSurfaceVk::WindowSurfaceVk(const egl::SurfaceState &surfaceState, EGLNativ
     // is done directly to the swapchain images, the render target will be updated to refer to a
     // swapchain image on every acquire.
     mColorRenderTarget.init(&mAncillaryColorImage, &mAncillaryColorImageViews, nullptr, nullptr,
-                            gl::LevelIndex(0), 0, 1, RenderTargetTransience::Default);
+                            gl::SourceLevel::Zero(), gl::SourceLayer::Zero(), 1,
+                            RenderTargetTransience::Default);
     mDepthStencilRenderTarget.init(&mDepthStencilImage, &mDepthStencilImageViews, nullptr, nullptr,
-                                   gl::LevelIndex(0), 0, 1, RenderTargetTransience::Default);
+                                   gl::SourceLevel::Zero(), gl::SourceLayer::Zero(), 1,
+                                   RenderTargetTransience::Default);
     mDepthStencilImageBinding.bind(&mDepthStencilImage);
     mAncillaryColorImageBinding.bind(&mAncillaryColorImage);
     // Reserve enough room upfront to avoid storage re-allocation.
@@ -1892,14 +1898,15 @@ angle::Result WindowSurfaceVk::createSwapchain(vk::ErrorContext *context)
             isSharedPresentMode() ? vk::TileMemory::Prohibited : vk::TileMemory::Preferred;
 
         ANGLE_TRY(mDepthStencilImage.init(context, gl::TextureType::_2D, vkExtents, dsFormat,
-                                          samples, dsUsage, gl::LevelIndex(0), 1, 1, robustInit,
-                                          mState.hasProtectedContent(), tileMemoryPreference));
+                                          samples, dsUsage, gl::SourceLevel::Zero(), 1, 1,
+                                          robustInit, mState.hasProtectedContent(),
+                                          tileMemoryPreference));
         ANGLE_TRY(mDepthStencilImage.initMemoryAndNonZeroFillIfNeeded(
             context, mState.hasProtectedContent(), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             vk::MemoryAllocationType::SwapchainDepthStencilImage));
 
         mDepthStencilRenderTarget.init(&mDepthStencilImage, &mDepthStencilImageViews, nullptr,
-                                       nullptr, gl::LevelIndex(0), 0, 1,
+                                       nullptr, gl::SourceLevel::Zero(), gl::SourceLayer::Zero(), 1,
                                        RenderTargetTransience::Default);
 
         // We will need to pass depth/stencil image views to the RenderTargetVk in the future.
@@ -1951,14 +1958,15 @@ angle::Result WindowSurfaceVk::createAncillaryColorImage(vk::ErrorContext *conte
     // used as well.
     ANGLE_TRY(mAncillaryColorImage.initAncillarySwapchain(
         context, gl::TextureType::_2D, vkExtents, Is90DegreeRotation(getPreTransform()),
-        intendedFormatID, actualFormatID, samples, usage, gl::LevelIndex(0), 1, 1, robustInit,
+        intendedFormatID, actualFormatID, samples, usage, gl::SourceLevel::Zero(), 1, 1, robustInit,
         mState.hasProtectedContent()));
     ANGLE_TRY(mAncillaryColorImage.initMemoryAndNonZeroFillIfNeeded(
         context, mState.hasProtectedContent(), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         vk::MemoryAllocationType::SwapchainMSAAImage));
 
     mColorRenderTarget.init(&mAncillaryColorImage, &mAncillaryColorImageViews, nullptr, nullptr,
-                            gl::LevelIndex(0), 0, 1, RenderTargetTransience::Default);
+                            gl::SourceLevel::Zero(), gl::SourceLayer::Zero(), 1,
+                            RenderTargetTransience::Default);
 
     return angle::Result::Continue;
 }
@@ -2518,6 +2526,8 @@ angle::Result WindowSurfaceVk::prePresentSubmit(ContextVk *contextVk,
     }
 
     SwapchainImage &image = mSwapchainImages[mCurrentSwapchainImageIndex];
+    const gl::SourceLevel imageLevel = gl::SourceLevel::Zero();
+    const gl::SourceLayer imageLayer = gl::SourceLayer::Zero();
 
     bool imageResolved = false;
     // Make sure deferred clears are applied, if any.
@@ -2538,16 +2548,16 @@ angle::Result WindowSurfaceVk::prePresentSubmit(ContextVk *contextVk,
         {
             vk::ClearValuesArray deferredClearValues;
             ANGLE_TRY(mAncillaryColorImage.flushSingleSubresourceStagedUpdates(
-                contextVk, gl::LevelIndex(0), 0, 1, &deferredClearValues, 0));
+                contextVk, imageLevel, imageLayer, 1, &deferredClearValues, 0));
             if (deferredClearValues.any())
             {
                 // Apply clear color directly to the single sampled image if the EGL surface is
                 // double buffered and when EGL_SWAP_BEHAVIOR is EGL_BUFFER_DESTROYED
-                gl::ImageIndex imageIndex = gl::ImageIndex::Make2D(gl::LevelIndex(0).get());
+                gl::SourceImageIndex imageIndex = gl::SourceImageIndex::Make2D(imageLevel);
                 image.image->stageClear(imageIndex, VK_IMAGE_ASPECT_COLOR_BIT,
                                         deferredClearValues[0]);
-                ANGLE_TRY(image.image->flushStagedUpdates(contextVk, gl::LevelIndex(0),
-                                                          gl::LevelIndex(1), 0, 1, {}));
+                ANGLE_TRY(image.image->flushStagedUpdates(contextVk, imageLevel, imageLevel + 1,
+                                                          imageLayer, imageLayer + 1, {}));
                 imageResolved = true;
             }
         }
@@ -2556,14 +2566,14 @@ angle::Result WindowSurfaceVk::prePresentSubmit(ContextVk *contextVk,
             // Apply clear value to mAncillaryColorImage and then resolve/copy to swapchain image
             // later if EGL surface is single buffered or when EGL_SWAP_BEHAVIOR is
             // EGL_BUFFER_PRESERVED
-            ANGLE_TRY(mAncillaryColorImage.flushStagedUpdates(contextVk, gl::LevelIndex(0),
-                                                              gl::LevelIndex(1), 0, 1, {}));
+            ANGLE_TRY(mAncillaryColorImage.flushStagedUpdates(contextVk, imageLevel, imageLevel + 1,
+                                                              imageLayer, imageLayer + 1, {}));
         }
     }
     else
     {
-        ANGLE_TRY(image.image->flushStagedUpdates(contextVk, gl::LevelIndex(0), gl::LevelIndex(1),
-                                                  0, 1, {}));
+        ANGLE_TRY(image.image->flushStagedUpdates(contextVk, imageLevel, imageLevel + 1, imageLayer,
+                                                  imageLayer + 1, {}));
     }
 
     // If user calls eglSwapBuffer without use it, image may already in Present layout (if swap
@@ -2609,7 +2619,7 @@ angle::Result WindowSurfaceVk::prePresentSubmit(ContextVk *contextVk,
         // Transition the ancillary image to TRANSFER_SRC for copy/resolve.
         vk::CommandResources resources;
         resources.onImageTransferRead(VK_IMAGE_ASPECT_COLOR_BIT, &mAncillaryColorImage);
-        resources.onImageTransferWrite(gl::LevelIndex(0), 1, 0, 1, VK_IMAGE_ASPECT_COLOR_BIT,
+        resources.onImageTransferWrite(imageLevel, 1, imageLayer, 1, VK_IMAGE_ASPECT_COLOR_BIT,
                                        image.image.get());
 
         vk::OutsideRenderPassCommandBufferHelper *commandBufferHelper;
@@ -2647,13 +2657,13 @@ angle::Result WindowSurfaceVk::prePresentSubmit(ContextVk *contextVk,
         // create one and copy the contents of the buffer to it.  Starting from the next frame,
         // rendering will be done to the ancillary color image instead.
         ANGLE_TRY(createAncillaryColorImage(contextVk));
-        ANGLE_TRY(mAncillaryColorImage.flushStagedUpdates(contextVk, gl::LevelIndex(0),
-                                                          gl::LevelIndex(1), 0, 1, {}));
+        ANGLE_TRY(mAncillaryColorImage.flushStagedUpdates(contextVk, imageLevel, imageLevel + 1,
+                                                          imageLayer, imageLayer + 1, {}));
 
         // Transition the ancillary image to TRANSFER_DST for copy.
         vk::CommandResources resources;
         resources.onImageTransferRead(VK_IMAGE_ASPECT_COLOR_BIT, image.image.get());
-        resources.onImageTransferWrite(gl::LevelIndex(0), 1, 0, 1, VK_IMAGE_ASPECT_COLOR_BIT,
+        resources.onImageTransferWrite(imageLevel, 1, imageLayer, 1, VK_IMAGE_ASPECT_COLOR_BIT,
                                        &mAncillaryColorImage);
 
         vk::OutsideRenderPassCommandBufferHelper *commandBufferHelper;
@@ -2676,8 +2686,8 @@ angle::Result WindowSurfaceVk::prePresentSubmit(ContextVk *contextVk,
     {
         // EGL specification says depth/stencil buffer data is no longer valid after swap. Set their
         // content invalid right before last submission so that we dont need to store.
-        mDepthStencilImage.invalidateEntireLevelContent(contextVk, gl::LevelIndex(0));
-        mDepthStencilImage.invalidateEntireLevelStencilContent(contextVk, gl::LevelIndex(0));
+        mDepthStencilImage.invalidateEntireLevelContent(contextVk, imageLevel);
+        mDepthStencilImage.invalidateEntireLevelStencilContent(contextVk, imageLevel);
     }
 
     ANGLE_TRY(contextVk->flushAndSubmitCommands(&presentSemaphore, nullptr,
@@ -3262,10 +3272,10 @@ VkResult WindowSurfaceVk::acquireNextSwapchainImage(vk::ErrorContext *context)
     // submission.
     if (!shouldRetainColor())
     {
-        image.image->invalidateEntireLevelContent(context, gl::LevelIndex(0));
+        image.image->invalidateEntireLevelContent(context, gl::SourceLevel::Zero());
         if (hasAncillaryColor())
         {
-            mAncillaryColorImage.invalidateEntireLevelContent(context, gl::LevelIndex(0));
+            mAncillaryColorImage.invalidateEntireLevelContent(context, gl::SourceLevel::Zero());
         }
     }
     // Depth buffer (excluding emulated channel) should have been invalidated before the last
@@ -3551,7 +3561,8 @@ angle::Result WindowSurfaceVk::getCurrentFramebuffer(ContextVk *contextVk,
     {
         const vk::ImageView *imageView = nullptr;
         ANGLE_TRY(swapchainImage.imageViews.getLevelLayerDrawImageView(
-            contextVk, *swapchainImage.image, vk::LevelIndex(0), 0, &imageView));
+            contextVk, *swapchainImage.image, vk::LevelIndex(0), vk::LayerIndex::Zero(),
+            &imageView));
         imageViews[0] = imageView->getHandle();
     }
 
@@ -3575,7 +3586,7 @@ angle::Result WindowSurfaceVk::initializeContents(const gl::Context *context,
                                                   GLenum binding,
                                                   const gl::OwnImageIndex &ownImageIndex)
 {
-    const gl::ImageIndex imageIndex = ownImageIndex.getUntranslated();
+    const gl::SourceImageIndex imageIndex = mState.toSourceIndex(ownImageIndex);
 
     ContextVk *contextVk = vk::GetImpl(context);
 
@@ -3605,8 +3616,9 @@ angle::Result WindowSurfaceVk::initializeContents(const gl::Context *context,
         case GL_DEPTH:
         case GL_STENCIL:
             ASSERT(mDepthStencilImage.valid());
-            mDepthStencilImage.stageRobustResourceClear(gl::ImageIndex::Make2D(0),
-                                                        mDepthStencilImage.getAspectFlags());
+            mDepthStencilImage.stageRobustResourceClear(
+                gl::SourceImageIndex::Make2D(gl::SourceLevel::Zero()),
+                mDepthStencilImage.getAspectFlags());
             ANGLE_TRY(mDepthStencilImage.flushAllStagedUpdates(contextVk));
             break;
         default:

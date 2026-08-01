@@ -5531,6 +5531,9 @@ void Renderer::initFeatures(const vk::ExtensionNameList &deviceExtensionNames,
             angle::ParseSamsungVulkanDriverVersion(mPhysicalDeviceProperties.driverVersion);
     }
 
+    INFO() << "driverVersion: " << driverVersion.major << "." << driverVersion.minor << "."
+           << driverVersion.subMinor << "." << driverVersion.patch;
+
     // Classify devices based on general architecture:
     //
     // - IMR (Immediate-Mode Rendering) devices generally progress through draw calls once and use
@@ -5573,16 +5576,16 @@ void Renderer::initFeatures(const vk::ExtensionNameList &deviceExtensionNames,
     // VK_EXT_pipeline_protected_access.
     // http://anglebug.com/42266183
     //
-    // http://b/381285096. On Intel platforms, we want to prevent protected queues being used as
-    // we cannot handle the teardown scenario if PXP termination occurs. However, enable this for
-    // Android, since the issue is rare and the fallout is isolated to the specific app (rather than
-    // crashing the whole system like in ChromeOS).
+    // http://b/381285096. On Intel platforms, we want to prevent protected
+    // queues being used as we cannot handle the teardown scenario if PXP termination occurs.
+    // http://b/512497379. We cannot handle teardown in Android on Intel either so it is left
+    // disabled there to avoid app compat issues until TODO: http://b/540469298
     ANGLE_FEATURE_CONDITION(
         &mFeatures, supportsProtectedMemory,
         mProtectedMemoryFeatures.protectedMemory == VK_TRUE &&
             (!isARMProprietary ||
              mPipelineProtectedAccessFeatures.pipelineProtectedAccess == VK_TRUE) &&
-            (!isIntel || IsAndroid()));
+            !isIntel);
 
     ANGLE_FEATURE_CONDITION(&mFeatures, supportsHostQueryReset,
                             mHostQueryResetFeatures.hostQueryReset == VK_TRUE);
@@ -7083,6 +7086,11 @@ void Renderer::initOpenCLFeatures(const vk::ExtensionNameList &deviceExtensionNa
         (mSubgroupProperties.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0 &&
             (mSubgroupProperties.supportedOperations & kRequiredSubgroupBits) ==
                 kRequiredSubgroupBits);
+
+    // TODO: some vendors have issues with alpha channel images, this feature/workaround
+    // serves as a allowlist around this support/feature http://anglebug.com/540157153
+    const bool vendorsSupportingAlphaChannel = isSamsung;
+    ANGLE_FEATURE_CONDITION(&mFeatures, enableAlphaChannelImages, vendorsSupportingAlphaChannel);
 }
 
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

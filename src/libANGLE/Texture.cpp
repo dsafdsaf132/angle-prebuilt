@@ -182,6 +182,13 @@ GLuint TextureState::getEffectiveMaxLevel() const
         clampedMaxLevel        = std::min(clampedMaxLevel, mImmutableLevels - 1);
         return clampedMaxLevel;
     }
+    if (mEGLImageSourceAttributes.type != gl::TextureType::InvalidEnum)
+    {
+        // If an EGL image sibling, BASE level must be zero.  EGL image siblings always view a
+        // single level, so MAX level is effectively zero as well.
+        ASSERT(mBaseLevel == 0);
+        return 0;
+    }
     return std::max(mMaxLevel, mBaseLevel);
 }
 
@@ -2588,10 +2595,11 @@ angle::Result Texture::ensureInitialized(const Context *context)
     }
 
     bool anyDirty = false;
+    bool allInitialized = (mState.getEffectiveBaseLevel() == 0);
 
-    ImageIndexIterator it =
-        ImageIndexIterator::MakeGeneric(mState.mType, 0, IMPLEMENTATION_MAX_TEXTURE_LEVELS + 1,
-                                        ImageIndex::kEntireLevel, ImageIndex::kEntireLevel);
+    ImageIndexIterator it = ImageIndexIterator::MakeGeneric(
+        mState.mType, static_cast<GLint>(mState.getEffectiveBaseLevel()),
+        IMPLEMENTATION_MAX_TEXTURE_LEVELS + 1, ImageIndex::kEntireLevel, ImageIndex::kEntireLevel);
     while (it.hasNext())
     {
         const ImageIndex index = it.next();
@@ -2599,17 +2607,27 @@ angle::Result Texture::ensureInitialized(const Context *context)
             mState.mImageDescs[GetImageDescIndex(index.getTarget(), index.getLevelIndex())];
         if (desc.initState == InitState::MayNeedInit && !desc.size.empty())
         {
-            ASSERT(mState.mInitState == InitState::MayNeedInit);
-            ANGLE_TRY(initializeContents(context, GL_NONE, index));
-            desc.initState = InitState::Initialized;
-            anyDirty       = true;
+            if (mState.computeLevelCompleteness(index.getTarget(), index.getLevelIndex()))
+            {
+                ASSERT(mState.mInitState == InitState::MayNeedInit);
+                ANGLE_TRY(initializeContents(context, GL_NONE, index));
+                desc.initState = InitState::Initialized;
+                anyDirty       = true;
+            }
+            else
+            {
+                allInitialized = false;
+            }
         }
     }
     if (anyDirty)
     {
         signalDirtyStorage(InitState::Initialized);
     }
-    mState.mInitState = InitState::Initialized;
+    if (allInitialized)
+    {
+        mState.mInitState = InitState::Initialized;
+    }
 
     return angle::Result::Continue;
 }
@@ -2672,7 +2690,7 @@ bool Texture::isEGLImageSource(const ImageIndex &index) const
 {
     for (const egl::Image *sourceImage : getSiblingSourcesOf())
     {
-        if (sourceImage->getSourceImageIndex() == index)
+        if (sourceImage->getSourceImageIndex().get() == index)
         {
             return true;
         }
@@ -2730,6 +2748,9 @@ void Texture::onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMess
     {
         case angle::SubjectMessage::ObjectReallocated:
             onStateChange(angle::SubjectMessage::ObjectReallocated);
+            break;
+        case angle::SubjectMessage::TextureLayerCountIncreased:
+            onStateChange(angle::SubjectMessage::TextureLayerCountIncreased);
             break;
         case angle::SubjectMessage::DirtyBitsFlagged:
             signalDirtyState(DIRTY_BIT_IMPLEMENTATION);

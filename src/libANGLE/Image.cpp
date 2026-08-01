@@ -23,11 +23,11 @@ namespace egl
 
 namespace
 {
-gl::ImageIndex GetImageIndex(EGLenum eglTarget, const egl::AttributeMap &attribs)
+gl::SourceImageIndex GetImageIndex(EGLenum eglTarget, const egl::AttributeMap &attribs)
 {
     if (!IsTextureTarget(eglTarget))
     {
-        return gl::ImageIndex();
+        return gl::SourceImageIndex::MakeInvalid();
     }
 
     gl::TextureTarget target = egl_gl::EGLImageTargetToTextureTarget(eglTarget);
@@ -36,16 +36,17 @@ gl::ImageIndex GetImageIndex(EGLenum eglTarget, const egl::AttributeMap &attribs
 
     if (target == gl::TextureTarget::_3D)
     {
-        return gl::ImageIndex::Make3D(mip, layer);
+        return gl::SourceImageIndex::Make3D(gl::SourceLevel::Zero() + mip,
+                                            gl::SourceLayer::Zero() + layer);
     }
     else if (gl::IsCubeMapFaceTarget(target))
     {
-        return gl::ImageIndex::MakeCubeMapFace(target, mip);
+        return gl::SourceImageIndex::MakeCubeMapFace(target, gl::SourceLevel::Zero() + mip);
     }
     else
     {
         ASSERT(layer == 0);
-        return gl::ImageIndex::MakeFromTarget(target, mip, 1);
+        return gl::SourceImageIndex::MakeFromTarget(target, gl::SourceLevel::Zero() + mip, 1);
     }
 }
 
@@ -117,9 +118,9 @@ void ImageSibling::setTargetImage(const gl::Context *context,
     imageTarget->addTargetSibling(this);
 
     attributesOut->type    = imageTarget->getSourceImageIndex().getType();
-    attributesOut->level   = imageTarget->getSourceImageIndex().getLevelIndex();
+    attributesOut->level   = imageTarget->getSourceImageIndex().getLevelIndex().get();
     attributesOut->zoffset = imageTarget->getSourceImageIndex().hasLayer()
-                                 ? imageTarget->getSourceImageIndex().getLayerIndex()
+                                 ? imageTarget->getSourceImageIndex().getLayerIndex().get()
                                  : 0;
 }
 
@@ -128,24 +129,26 @@ angle::Result ImageSibling::orphanImages(const gl::Context *context,
 {
     ASSERT(outReleaseImage != nullptr);
 
+    angle::ResultAccumulator result = angle::Result::Continue;
+
     if (mTargetOf.get() != nullptr)
     {
         // Can't be a target and have sources.
         ASSERT(mSourcesOf.empty());
 
-        ANGLE_TRY(mTargetOf->orphanSibling(context, this));
+        result           = mTargetOf->orphanSibling(context, this);
         *outReleaseImage = mTargetOf.set(DisplayFromContext(context), nullptr);
     }
     else
     {
         for (Image *sourceImage : mSourcesOf)
         {
-            ANGLE_TRY(sourceImage->orphanSibling(context, this));
+            result = sourceImage->orphanSibling(context, this);
         }
         mSourcesOf.clear();
     }
 
-    return angle::Result::Continue;
+    return result;
 }
 
 void ImageSibling::addImageSource(egl::Image *imageSource)
@@ -455,8 +458,7 @@ angle::Result Image::orphanSibling(const gl::Context *context, ImageSibling *sib
 {
     ASSERT(sibling != nullptr);
 
-    // notify impl
-    ANGLE_TRY(mImplementation->orphan(context, sibling));
+    angle::Result result = mImplementation->orphan(context, sibling);
 
     if (mState.source == sibling)
     {
@@ -470,7 +472,7 @@ angle::Result Image::orphanSibling(const gl::Context *context, ImageSibling *sib
         }());
         mState.source = nullptr;
         mOrphanedAndNeedsInit =
-            (sibling->initState(GL_NONE, mState.imageIndex) == gl::InitState::MayNeedInit);
+            (sibling->initState(GL_NONE, mState.imageIndex.get()) == gl::InitState::MayNeedInit);
     }
     else
     {
@@ -478,7 +480,7 @@ angle::Result Image::orphanSibling(const gl::Context *context, ImageSibling *sib
         mState.targets.erase(sibling);
     }
 
-    return angle::Result::Continue;
+    return result;
 }
 
 const gl::Format &Image::getFormat() const
@@ -583,7 +585,7 @@ Error Image::initialize(const Display *display, const gl::Context *context)
         mState.yuv = externalSibling->isYUV();
     }
 
-    mState.format = mState.source->getAttachmentFormat(GL_NONE, mState.imageIndex);
+    mState.format = mState.source->getAttachmentFormat(GL_NONE, mState.imageIndex.get());
 
     if (mState.colorspace != EGL_GL_COLORSPACE_DEFAULT_EXT)
     {
@@ -603,8 +605,8 @@ Error Image::initialize(const Display *display, const gl::Context *context)
         mState.yuv = gl::IsYuvFormat(mState.format.info->sizedInternalFormat);
     }
 
-    mState.size    = mState.source->getAttachmentSize(mState.imageIndex);
-    mState.samples = mState.source->getAttachmentSamples(mState.imageIndex);
+    mState.size    = mState.source->getAttachmentSize(mState.imageIndex.get());
+    mState.samples = mState.source->getAttachmentSamples(mState.imageIndex.get());
 
     if (IsTextureTarget(mState.target))
     {
@@ -656,7 +658,7 @@ gl::InitState Image::sourceInitState() const
         return mOrphanedAndNeedsInit ? gl::InitState::MayNeedInit : gl::InitState::Initialized;
     }
 
-    return mState.source->initState(GL_NONE, mState.imageIndex);
+    return mState.source->initState(GL_NONE, mState.imageIndex.get());
 }
 
 void Image::setInitState(gl::InitState initState)
@@ -666,7 +668,7 @@ void Image::setInitState(gl::InitState initState)
         mOrphanedAndNeedsInit = false;
     }
 
-    return mState.source->setInitState(GL_NONE, mState.imageIndex, initState);
+    return mState.source->setInitState(GL_NONE, mState.imageIndex.get(), initState);
 }
 
 Error Image::exportVkImage(void *vkImage, void *vkImageCreateInfo)

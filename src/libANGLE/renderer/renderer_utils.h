@@ -18,6 +18,7 @@
 
 #include "GLSLANG/ShaderLang.h"
 #include "common/angleutils.h"
+#include "common/hash_containers.h"
 #include "common/utilities.h"
 #include "libANGLE/ImageIndex.h"
 #include "libANGLE/angletypes.h"
@@ -340,6 +341,16 @@ void GetUniform(const gl::ProgramExecutable *executable,
                 GLenum entryPointType,
                 const DefaultUniformBlockMap *defaultUniformBlocks);
 
+// Remove `[*]` from uniform names
+std::string RemoveArraySubscripts(const std::string &uniformName);
+
+// Maps sampler-in-struct uniform names to extracted sampler names, matching the transformation done
+// by the translator (RewriteStructSamplers).  Indices must have already been stripped from the
+// uniformName.
+std::string GetExtractedStructSamplerName(
+    const std::string uniformNameWithoutIndices,
+    angle::HashMap<std::string, size_t> *extractedSamplerIndices);
+
 const angle::Format &GetFormatFromFormatType(GLenum format, GLenum type);
 
 angle::Result ComputeStartVertex(ContextImpl *contextImpl,
@@ -569,7 +580,7 @@ GLint LimitToIntAnd(const LargerInt physicalDeviceValue, const uint64_t cap)
 bool TextureHasAnyRedefinedLevels(const gl::CubeFaceArray<gl::TexLevelMask> &redefinedLevels);
 bool IsTextureLevelRedefined(const gl::CubeFaceArray<gl::TexLevelMask> &redefinedLevels,
                              gl::TextureType textureType,
-                             gl::LevelIndex level);
+                             gl::SourceLevel level);
 
 enum class TextureLevelDefinition
 {
@@ -591,14 +602,13 @@ bool TextureRedefineLevel(const TextureLevelAllocation levelAllocation,
                           const TextureLevelDefinition levelDefinition,
                           bool immutableFormat,
                           uint32_t levelCount,
-                          const uint32_t layerIndex,
-                          const gl::ImageIndex &index,
-                          gl::LevelIndex imageFirstAllocatedLevel,
+                          const gl::SourceImageIndex &index,
+                          gl::SourceLevel imageFirstAllocatedLevel,
                           gl::CubeFaceArray<gl::TexLevelMask> *redefinedLevels);
 
-void TextureRedefineGenerateMipmapLevels(gl::LevelIndex baseLevel,
-                                         gl::LevelIndex maxLevel,
-                                         gl::LevelIndex firstGeneratedLevel,
+void TextureRedefineGenerateMipmapLevels(gl::SourceLevel baseLevel,
+                                         gl::SourceLevel maxLevel,
+                                         gl::SourceLevel firstGeneratedLevel,
                                          gl::CubeFaceArray<gl::TexLevelMask> *redefinedLevels);
 
 enum class ImageMipLevels

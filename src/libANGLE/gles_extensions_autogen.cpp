@@ -233,7 +233,6 @@ const ExtensionInfoMap &GetExtensionInfoMap()
         map["GL_CHROMIUM_copy_texture"] = esOnlyExtension(&Extensions::copyTextureCHROMIUM);
         map["GL_ANGLE_copy_texture_3d"] = enableableExtension(&Extensions::copyTexture3dANGLE);
         map["GL_ANGLE_explicit_context"] = esOnlyExtension(&Extensions::explicitContextANGLE);
-        map["GL_CHROMIUM_framebuffer_mixed_samples"] = esOnlyExtension(&Extensions::framebufferMixedSamplesCHROMIUM);
         map["GL_ANGLE_framebuffer_multisample"] = enableableExtension(&Extensions::framebufferMultisampleANGLE);
         map["GL_ANGLE_get_image"] = enableableExtension(&Extensions::getImageANGLE);
         map["GL_ANGLE_get_serialized_context_string"] = esOnlyExtension(&Extensions::getSerializedContextStringANGLE);
@@ -280,6 +279,7 @@ const ExtensionInfoMap &GetExtensionInfoMap()
         map["GL_OES_point_size_array"] = enableableExtension(&Extensions::pointSizeArrayOES);
         map["GL_OES_point_sprite"] = enableableExtension(&Extensions::pointSpriteOES);
         map["GL_OES_query_matrix"] = enableableExtension(&Extensions::queryMatrixOES);
+        map["GL_OES_stencil8"] = enableableExtension(&Extensions::stencil8OES);
         map["GL_OES_texture_cube_map"] = enableableExtension(&Extensions::textureCubeMapOES);
         map["GL_EXT_texture_lod_bias"] = enableableExtension(&Extensions::textureLodBiasEXT);
         map["GL_OES_texture_mirrored_repeat"] = enableableExtension(&Extensions::textureMirroredRepeatOES);

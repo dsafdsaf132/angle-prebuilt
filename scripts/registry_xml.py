@@ -259,7 +259,6 @@ angle_es_only_extensions = [
     "GL_CHROMIUM_bind_uniform_location",
     "GL_CHROMIUM_copy_compressed_texture",
     "GL_CHROMIUM_copy_texture",
-    "GL_CHROMIUM_framebuffer_mixed_samples",
 ]
 
 gles_es_only_extensions = [
@@ -296,6 +295,7 @@ gles1_extensions = [
     "GL_OES_point_size_array",
     "GL_OES_point_sprite",
     "GL_OES_query_matrix",
+    "GL_OES_stencil8",
     "GL_OES_texture_cube_map",
     "GL_OES_texture_mirrored_repeat",
 ]
