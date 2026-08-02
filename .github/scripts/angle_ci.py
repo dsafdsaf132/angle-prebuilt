@@ -6,7 +6,6 @@
 
 import argparse
 import datetime
-import hashlib
 import json
 import os
 import re
@@ -17,6 +16,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -34,8 +34,15 @@ EXPECTED_RELEASE_ARCHIVES = {
     "win32-arm64.zip": ("win32", "arm64"),
 }
 DEFAULT_LINUX_ARM64_LLVM_VERSION = "23"
-MIN_WINDOWS_SDK_VERSION = (10, 0, 26100, 0)
 WINDOWS_DEBUGGER_PATCH_MARKER = "ANGLE CI: debugger tools are optional"
+WINDOWS_SDK_DOWNLOADS_URL = (
+    "https://learn.microsoft.com/en-us/windows/apps/windows-sdk/downloads?accept=text/markdown"
+)
+WINDOWS_SDK_LINK_HOST = "go.microsoft.com"
+WINDOWS_SDK_DOWNLOAD_HOSTS = {
+    "download.microsoft.com",
+    "download.visualstudio.microsoft.com",
+}
 
 COMMON_GN_ARGS = {
     "is_debug": False,
@@ -316,18 +323,6 @@ def read_chromium_sdk_version(path):
     return matches[0]
 
 
-def replace_chromium_sdk_version(path, old_version, new_version):
-    path = Path(path)
-    text = path.read_text(encoding="utf-8")
-    pattern = re.compile(
-        rf"^(SDK_VERSION\s*=\s*['\"]){re.escape(old_version)}(['\"]\s*)$", re.MULTILINE
-    )
-    updated, count = pattern.subn(rf"\g<1>{new_version}\g<2>", text)
-    if count != 1:
-        raise RuntimeError(f"Could not replace SDK_VERSION in {path}; matches={count}")
-    path.write_text(updated, encoding="utf-8")
-
-
 def windows_sdk_root(sdk_root=None):
     if sdk_root:
         return Path(sdk_root)
@@ -384,14 +379,6 @@ def installed_windows_sdks(sdk_root, arch=None):
     return [name for _, name in sorted(versions)]
 
 
-def sha256_file(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def download_file(url, destination, attempts=3):
     destination = Path(destination)
     partial = destination.with_suffix(destination.suffix + ".part")
@@ -401,14 +388,98 @@ def download_file(url, destination, attempts=3):
             partial.unlink(missing_ok=True)
             with urllib.request.urlopen(request, timeout=60) as response, partial.open("wb") as output:
                 shutil.copyfileobj(response, output, length=1024 * 1024)
+                final_url = response.geturl()
             partial.replace(destination)
-            return
+            return final_url
         except Exception:
             partial.unlink(missing_ok=True)
             if attempt == attempts:
                 raise
             print(f"Windows SDK download attempt {attempt} failed; retrying")
             time.sleep(attempt * 10)
+
+
+def download_text(url, attempts=3):
+    request = urllib.request.Request(
+        url,
+        headers={"Accept": "text/markdown", "User-Agent": "ANGLE-CI/1.0"},
+    )
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return response.read().decode("utf-8")
+        except Exception:
+            if attempt == attempts:
+                raise
+            print(f"Windows SDK release list attempt {attempt} failed; retrying")
+            time.sleep(attempt * 10)
+
+
+def require_https_host(url, allowed_hosts):
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or parsed.hostname not in allowed_hosts:
+        allowed = ", ".join(sorted(allowed_hosts))
+        raise RuntimeError(f"Untrusted Windows SDK URL {url!r}; expected HTTPS host: {allowed}")
+
+
+def resolve_windows_sdk_installer(requested_version, downloads_text):
+    requested = parse_numeric_version(requested_version)
+    candidates = []
+    pattern = re.compile(
+        r"Windows SDK for Windows[^\n]*\((10\.0\.\d+\.\d+)\)[^\n]*"
+        r"\[Installer\]\((?P<url>(?:https:)?//go\.microsoft\.com/[^)]+)\)",
+        re.IGNORECASE,
+    )
+    for match in pattern.finditer(downloads_text):
+        release_version = match.group(1)
+        parsed_version = parse_numeric_version(release_version)
+        if parsed_version[:3] != requested[:3]:
+            continue
+        url = match.group("url")
+        if url.startswith("//"):
+            url = "https:" + url
+        require_https_host(url, {WINDOWS_SDK_LINK_HOST})
+        candidates.append((parsed_version, release_version, url))
+
+    if not candidates:
+        raise RuntimeError(
+            f"Microsoft does not list an installer for upstream Windows SDK {requested_version}"
+        )
+    _, release_version, url = max(candidates)
+    return release_version, url
+
+
+def verify_microsoft_authenticode(path):
+    if os.name != "nt":
+        raise RuntimeError("Authenticode verification is only supported on Windows")
+    powershell = shutil.which("powershell.exe") or shutil.which("pwsh.exe")
+    if not powershell:
+        raise RuntimeError("PowerShell is required to verify the Windows SDK installer")
+    script = (
+        "$ErrorActionPreference = 'Stop'; "
+        "$signature = Get-AuthenticodeSignature "
+        "-LiteralPath $env:ANGLE_CI_WINDOWS_SDK_INSTALLER; "
+        "if ($signature.Status -ne 'Valid') { "
+        "throw ('Invalid Authenticode status: ' + $signature.Status) }; "
+        "$subject = $signature.SignerCertificate.Subject; "
+        "if ($subject -notmatch '(^|,\\s*)O=Microsoft Corporation(,|$)' -and "
+        "$subject -notmatch '^CN=Microsoft Corporation(,|$)') { "
+        "throw ('Unexpected Authenticode signer: ' + $subject) }; "
+        "Write-Output $subject"
+    )
+    env = os.environ.copy()
+    env["ANGLE_CI_WINDOWS_SDK_INSTALLER"] = str(Path(path).resolve())
+    result = subprocess.run(
+        [powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout).strip()
+        raise RuntimeError(f"Windows SDK installer signature verification failed: {details}")
+    print(f"Verified Windows SDK installer signer: {result.stdout.strip()}")
 
 
 def chromium_windows_sdk_version(source_root):
@@ -426,129 +497,108 @@ def chromium_windows_sdk_version(source_root):
 
 def install_windows_sdk(args):
     sdk_root = windows_sdk_root(args.sdk_root)
-    sdk_version = args.version
-    parse_numeric_version(sdk_version)
     requested_version = chromium_windows_sdk_version(args.source_root)
-    if requested_version != sdk_version:
-        raise RuntimeError(
-            f"Pinned Windows SDK installer is for {sdk_version}, but Chromium requests "
-            f"{requested_version}; update the installer URL and SHA-256"
-        )
-    missing = missing_windows_sdk_files(sdk_root, sdk_version, args.arch)
+    missing = missing_windows_sdk_files(sdk_root, requested_version, args.arch)
     if not missing:
-        print(f"Preferred Windows SDK {sdk_version} is already complete for {args.arch}")
+        print(f"Upstream Windows SDK {requested_version} is already complete for {args.arch}")
         return
 
-    log_path = None
-    try:
-        if os.name != "nt":
-            raise RuntimeError("Windows SDK installation is only supported on Windows")
-        download_dir = Path(args.download_dir)
-        download_dir.mkdir(parents=True, exist_ok=True)
-        installer = download_dir / f"winsdksetup-{sdk_version}.exe"
-        log_path = download_dir / f"winsdksetup-{sdk_version}.log"
-        download_file(args.installer_url, installer)
-        actual_hash = sha256_file(installer)
-        expected_hash = args.installer_sha256.lower()
-        if actual_hash != expected_hash:
-            raise RuntimeError(
-                f"Windows SDK installer SHA-256 mismatch: expected {expected_hash}, got {actual_hash}"
-            )
+    if os.name != "nt":
+        raise RuntimeError("Windows SDK installation is only supported on Windows")
+    downloads_text = download_text(WINDOWS_SDK_DOWNLOADS_URL)
+    release_version, installer_url = resolve_windows_sdk_installer(
+        requested_version, downloads_text
+    )
+    print(
+        f"Upstream requests Windows SDK {requested_version}; "
+        f"Microsoft installer release is {release_version}"
+    )
 
-        features = ["OptionId.DesktopCPPx64", "OptionId.WindowsDesktopDebuggers"]
-        if args.arch == "arm64":
-            features.append("OptionId.DesktopCPPARM64")
-        command = [
-            str(installer),
-            "/features",
-            *features,
-            "/quiet",
-            "/norestart",
-            "/ceip",
-            "off",
-            "/log",
-            str(log_path),
-        ]
-        print(f"Installing Windows SDK {sdk_version} for {args.arch}")
+    download_dir = Path(args.download_dir)
+    download_dir.mkdir(parents=True, exist_ok=True)
+    installer = download_dir / f"winsdksetup-{release_version}.exe"
+    log_path = download_dir / f"winsdksetup-{release_version}.log"
+    final_url = download_file(installer_url, installer)
+    require_https_host(final_url, WINDOWS_SDK_DOWNLOAD_HOSTS)
+    verify_microsoft_authenticode(installer)
+
+    features = ["OptionId.DesktopCPPx64", "OptionId.WindowsDesktopDebuggers"]
+    if args.arch == "arm64":
+        features.append("OptionId.DesktopCPPARM64")
+    command = [
+        str(installer),
+        "/features",
+        *features,
+        "/quiet",
+        "/norestart",
+        "/ceip",
+        "off",
+        "/log",
+        str(log_path),
+    ]
+    print(f"Installing upstream Windows SDK {requested_version} for {args.arch}")
+    try:
         result = subprocess.run(command, check=False)
         if result.returncode not in (0, 3010):
             raise RuntimeError(f"Windows SDK installer exited with {result.returncode}")
-
-        missing = missing_windows_sdk_files(sdk_root, sdk_version, args.arch)
-        if missing:
-            formatted = "\n".join(f"  - {path}" for path in missing)
-            raise RuntimeError(f"Windows SDK {sdk_version} installation is incomplete:\n{formatted}")
-        print(f"Installed preferred Windows SDK {sdk_version} for {args.arch}")
-    except Exception as error:
-        print(f"::warning::Could not install preferred Windows SDK {sdk_version}: {error}")
-        if log_path and log_path.is_file():
+    except Exception:
+        if log_path.is_file():
             log_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
             print("Windows SDK installer log tail:")
             print("\n".join(log_lines[-80:]))
-        if not missing_windows_sdk_files(sdk_root, sdk_version, args.arch):
-            print(f"Preferred Windows SDK {sdk_version} files are complete; continuing")
-            return
-        print("Falling back to a complete preinstalled Windows SDK")
+        raise
+
+    missing = missing_windows_sdk_files(sdk_root, requested_version, args.arch)
+    if missing:
+        formatted = "\n".join(f"  - {path}" for path in missing)
+        raise RuntimeError(
+            f"Upstream Windows SDK {requested_version} installation is incomplete:\n{formatted}"
+        )
+    print(f"Installed upstream Windows SDK {requested_version} for {args.arch}")
 
 
-def select_installed_ntddi_macro(sdk_root, sdk_version):
+def installed_ntddi_macros(sdk_root, sdk_version):
     header = Path(sdk_root) / "Include" / sdk_version / "shared" / "sdkddkver.h"
     text = header.read_text(encoding="utf-8", errors="replace")
     macros = []
     for name, value in re.findall(
-        r"^\s*#\s*define\s+(NTDDI_WIN11_[A-Z]{2})\s+(0x[0-9A-Fa-f]+)\b",
+        r"^\s*#\s*define\s+(NTDDI_[A-Z0-9_]+)\s+(0x[0-9A-Fa-f]+)\b",
         text,
         re.MULTILINE,
     ):
         macros.append((int(value, 16), name))
     if not macros:
         raise RuntimeError(f"No Windows 11 NTDDI release macros found in {header}")
-    return max(macros)[1], {name for _, name in macros}
+    return {name for _, name in macros}
 
 
 def select_installed_windows_sdk(source_root, sdk_root, arch):
     source_root = Path(source_root)
-    setup_toolchain = source_root / "build" / "toolchain" / "win" / "setup_toolchain.py"
-    vs_toolchain = source_root / "build" / "vs_toolchain.py"
     win_config = source_root / "build" / "config" / "win" / "BUILD.gn"
 
-    setup_version = chromium_windows_sdk_version(source_root)
-    vs_version = setup_version
-
+    requested_version = chromium_windows_sdk_version(source_root)
     installed = installed_windows_sdks(sdk_root, arch=arch)
-    if not installed:
-        raise RuntimeError(f"No complete Windows SDK installations found under {sdk_root}")
-    print(f"Chromium requested Windows SDK: {setup_version}")
+    print(f"Chromium requested Windows SDK: {requested_version}")
     print(f"Installed Windows SDKs: {', '.join(installed)}")
-    if setup_version in installed:
-        selected = setup_version
-        print(f"Using requested Windows SDK {setup_version}")
-    else:
-        selected = installed[-1]
-        if parse_numeric_version(selected) < MIN_WINDOWS_SDK_VERSION:
-            minimum = ".".join(str(part) for part in MIN_WINDOWS_SDK_VERSION)
-            raise RuntimeError(
-                f"Newest installed Windows SDK is {selected}; {minimum} or newer is required"
-            )
-
-        print(f"::warning::Windows SDK {setup_version} is unavailable; using installed SDK {selected}")
-        replace_chromium_sdk_version(setup_toolchain, setup_version, selected)
-        replace_chromium_sdk_version(vs_toolchain, vs_version, selected)
+    if requested_version not in installed:
+        raise RuntimeError(
+            f"Upstream Windows SDK {requested_version} is not completely installed for {arch}"
+        )
 
     config_text = win_config.read_text(encoding="utf-8")
     current_macros = re.findall(r'"NTDDI_VERSION=(NTDDI_[A-Z0-9_]+)"', config_text)
     if len(current_macros) > 1:
         raise RuntimeError(f"Expected at most one NTDDI_VERSION in {win_config}")
     if current_macros:
-        selected_macro, available_macros = select_installed_ntddi_macro(sdk_root, selected)
+        available_macros = installed_ntddi_macros(sdk_root, requested_version)
         current_macro = current_macros[0]
         if current_macro not in available_macros:
-            updated = config_text.replace(
-                f'"NTDDI_VERSION={current_macro}"', f'"NTDDI_VERSION={selected_macro}"', 1
+            raise RuntimeError(
+                f"Upstream NTDDI macro {current_macro} is unavailable in Windows SDK "
+                f"{requested_version}"
             )
-            win_config.write_text(updated, encoding="utf-8")
-            print(f"Using {selected_macro} instead of unavailable {current_macro}")
-    return selected
+    print(f"Using exact upstream Windows SDK {requested_version}")
+    return requested_version
 
 
 def make_windows_debugger_tools_optional(source_root):
@@ -1320,7 +1370,8 @@ def parse_release_asset_name(name):
 def self_test(args):
     with tempfile.TemporaryDirectory() as temp:
         test_windows_sdk_layout(Path(temp) / "windows-sdk-layout")
-        test_windows_toolchain_fallback(Path(temp) / "windows-toolchain")
+        test_windows_sdk_installer_resolution()
+        test_exact_windows_toolchain(Path(temp) / "windows-toolchain")
         pe_path = Path(temp) / "minimal-arm64.dll"
         pe_path.write_bytes(create_minimal_pe(import_name="KERNEL32.dll"))
         imports = read_pe_imports(pe_path)
@@ -1363,15 +1414,28 @@ def test_windows_sdk_layout(test_root):
     create_test_windows_sdk(test_root, sdk_version, "arm64")
     if sdk_version not in installed_windows_sdks(test_root, arch="arm64"):
         raise AssertionError("Complete Windows arm64 SDK was not discovered")
-    digest_input = test_root / "digest-input"
-    digest_input.write_bytes(b"abc")
-    if sha256_file(digest_input) != (
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-    ):
-        raise AssertionError("Windows SDK installer SHA-256 validation is incorrect")
 
 
-def test_windows_toolchain_fallback(test_root):
+def test_windows_sdk_installer_resolution():
+    downloads = """
+| **Windows SDK for Windows 11 (10.0.29000.1234)** | [Installer](https://go.microsoft.com/fwlink/?linkid=1234) |
+| **Windows SDK for Windows 11 (10.0.29000.2345)** | [Installer](//go.microsoft.com/fwlink/?linkid=2345) |
+| **Windows SDK for Windows 11 (10.0.28000.9999)** | [Installer](https://go.microsoft.com/fwlink/?linkid=9999) |
+"""
+    release, url = resolve_windows_sdk_installer("10.0.29000.0", downloads)
+    if release != "10.0.29000.2345":
+        raise AssertionError(f"Unexpected Windows SDK servicing release: {release}")
+    if url != "https://go.microsoft.com/fwlink/?linkid=2345":
+        raise AssertionError(f"Unexpected Windows SDK installer URL: {url}")
+    try:
+        resolve_windows_sdk_installer("10.0.30000.0", downloads)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("Missing Windows SDK family did not fail")
+
+
+def test_exact_windows_toolchain(test_root):
     source_root = test_root / "source"
     sdk_root = test_root / "sdk"
     setup_toolchain = source_root / "build" / "toolchain" / "win" / "setup_toolchain.py"
@@ -1379,9 +1443,12 @@ def test_windows_toolchain_fallback(test_root):
     win_config = source_root / "build" / "config" / "win" / "BUILD.gn"
     setup_toolchain.parent.mkdir(parents=True)
     win_config.parent.mkdir(parents=True)
-    setup_toolchain.write_text("SDK_VERSION = '10.0.28000.0'\n", encoding="utf-8")
+    requested_version = "10.0.29000.0"
+    setup_toolchain.write_text(
+        f"SDK_VERSION = '{requested_version}'\n", encoding="utf-8"
+    )
     vs_toolchain.write_text(
-        "SDK_VERSION = '10.0.28000.0'\n\n"
+        f"SDK_VERSION = '{requested_version}'\n\n"
         "def _CopyDebugger(target_dir, target_cpu):\n"
         "  win_sdk_dir = SetEnvironmentAndGetSDKDir()\n"
         "  if not win_sdk_dir:\n"
@@ -1390,27 +1457,38 @@ def test_windows_toolchain_fallback(test_root):
         encoding="utf-8",
     )
     win_config.write_text(
-        'defines = [\n  "NTDDI_VERSION=NTDDI_WIN11_BR",\n]\n', encoding="utf-8"
+        'defines = [\n  "NTDDI_VERSION=NTDDI_WIN11_XY",\n]\n', encoding="utf-8"
     )
 
-    sdk_version = "10.0.26100.0"
-    create_test_windows_sdk(sdk_root, sdk_version, "arm64")
-    (sdk_root / "Include" / sdk_version / "shared" / "sdkddkver.h").write_text(
-        "#define NTDDI_WIN11_ZN 0x0A00000E\n"
-        "#define NTDDI_WIN11_GE 0x0A000010\n",
+    old_version = "10.0.28000.0"
+    create_test_windows_sdk(sdk_root, old_version, "arm64")
+    (sdk_root / "Include" / old_version / "shared" / "sdkddkver.h").write_text(
+        "#define NTDDI_WIN11_BR 0x0A000012\n",
         encoding="utf-8",
     )
 
     args = argparse.Namespace(
         source_root=str(source_root), sdk_root=str(sdk_root), arch="arm64"
     )
+    try:
+        prepare_windows_toolchain(args)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("A different installed Windows SDK was accepted")
+
+    create_test_windows_sdk(sdk_root, requested_version, "arm64")
+    (sdk_root / "Include" / requested_version / "shared" / "sdkddkver.h").write_text(
+        "#define NTDDI_WIN11_XY 0x0A000014\n",
+        encoding="utf-8",
+    )
     prepare_windows_toolchain(args)
-    if read_chromium_sdk_version(setup_toolchain) != sdk_version:
-        raise AssertionError("setup_toolchain.py did not select the installed SDK")
-    if read_chromium_sdk_version(vs_toolchain) != sdk_version:
-        raise AssertionError("vs_toolchain.py did not select the installed SDK")
-    if "NTDDI_VERSION=NTDDI_WIN11_GE" not in win_config.read_text(encoding="utf-8"):
-        raise AssertionError("Windows NTDDI fallback was not selected")
+    if read_chromium_sdk_version(setup_toolchain) != requested_version:
+        raise AssertionError("setup_toolchain.py SDK version was modified")
+    if read_chromium_sdk_version(vs_toolchain) != requested_version:
+        raise AssertionError("vs_toolchain.py SDK version was modified")
+    if "NTDDI_VERSION=NTDDI_WIN11_XY" not in win_config.read_text(encoding="utf-8"):
+        raise AssertionError("Upstream Windows NTDDI macro was modified")
     if WINDOWS_DEBUGGER_PATCH_MARKER not in vs_toolchain.read_text(encoding="utf-8"):
         raise AssertionError("Windows debugger compatibility patch was not applied")
 
@@ -1507,11 +1585,8 @@ def main():
 
     windows_sdk = subparsers.add_parser("install-windows-sdk")
     windows_sdk.add_argument("--source-root", required=True)
-    windows_sdk.add_argument("--version", required=True)
     windows_sdk.add_argument("--arch", choices=("x64", "arm64"), required=True)
     windows_sdk.add_argument("--sdk-root")
-    windows_sdk.add_argument("--installer-url", required=True)
-    windows_sdk.add_argument("--installer-sha256", required=True)
     windows_sdk.add_argument("--download-dir", required=True)
     windows_sdk.set_defaults(func=install_windows_sdk)
 
