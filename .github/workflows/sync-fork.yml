@@ -24,13 +24,13 @@ concurrency:
 jobs:
   sync:
     name: sync-fork
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       UPSTREAM_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.upstream_ref || 'main' }}
       TARGET_BRANCH: ${{ github.event_name == 'workflow_dispatch' && inputs.target_branch || 'main' }}
     steps:
       - name: Check out fork
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.target_branch || 'main' }}

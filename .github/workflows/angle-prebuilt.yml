@@ -37,7 +37,7 @@ concurrency:
 jobs:
   preflight:
     name: preflight
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       should_build: ${{ steps.decide.outputs.should_build }}
       build_ref: ${{ steps.decide.outputs.build_ref }}
@@ -51,6 +51,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_ANGLE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.angle_ref || '' }}
           INPUT_ANGLE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.angle_commit || '' }}
+          INPUT_ARTIFACT_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.artifact_run_id || '' }}
           WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion || '' }}
           WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || 'main' }}
           GH_TOKEN: ${{ github.token }}
@@ -59,8 +60,33 @@ jobs:
           should_build=0
           build_ref=""
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            should_build=1
-            build_ref="${INPUT_ANGLE_COMMIT:-$INPUT_ANGLE_REF}"
+            if [[ -n "$INPUT_ARTIFACT_RUN_ID" ]]; then
+              echo "Reusing artifacts from run $INPUT_ARTIFACT_RUN_ID; skipping source resolution"
+            else
+              should_build=1
+              requested_ref="${INPUT_ANGLE_COMMIT:-$INPUT_ANGLE_REF}"
+              encoded_ref="$(
+                python3 -c \
+                  'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' \
+                  "$requested_ref"
+              )"
+              commit_json="$(
+                curl -fsSL \
+                  --retry 5 \
+                  --retry-delay 5 \
+                  --retry-all-errors \
+                  --connect-timeout 20 \
+                  -H "Authorization: Bearer $GH_TOKEN" \
+                  -H "Accept: application/vnd.github+json" \
+                  "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$encoded_ref"
+              )"
+              build_ref="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["sha"])' <<< "$commit_json")"
+              if [[ ! "$build_ref" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "::error::Invalid resolved ANGLE commit for $requested_ref: $build_ref"
+                exit 1
+              fi
+              echo "Resolved ANGLE ref $requested_ref to $build_ref"
+            fi
           elif [[ "$EVENT_NAME" == "workflow_run" && "$WORKFLOW_RUN_CONCLUSION" == "success" ]]; then
             target_branch="${WORKFLOW_RUN_HEAD_BRANCH:-main}"
             ref_json="$(
@@ -158,7 +184,7 @@ jobs:
       matrix:
         include:
           - target: linux-x64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             platform: linux
             arch: x64
           - target: linux-arm64
@@ -170,11 +196,11 @@ jobs:
             platform: darwin
             arch: x64
           - target: macos-arm64
-            runner: macos-latest
+            runner: macos-15
             platform: darwin
             arch: arm64
           - target: windows-x64
-            runner: windows-latest
+            runner: windows-2022
             platform: win32
             arch: x64
           - target: windows-arm64
@@ -185,17 +211,18 @@ jobs:
     env:
       DEPOT_TOOLS_WIN_TOOLCHAIN: "0"
       GYP_MSVS_VERSION: "2022"
+      LINUX_ARM64_LLVM_VERSION: "23"
 
     steps:
       - name: Check out workflow repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           path: angle
           ref: ${{ needs.preflight.outputs.build_ref }}
 
       - name: Check out CI helpers
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: ci
           ref: ${{ github.sha }}
@@ -301,6 +328,7 @@ jobs:
             pkg-config \
             xvfb
           if [[ "${{ matrix.platform }}" == "linux" && "${{ matrix.arch }}" == "arm64" ]]; then
+            llvm_version="$LINUX_ARM64_LLVM_VERSION"
             sudo install -d -m 0755 /etc/apt/keyrings
             curl -fsSL \
               --retry 5 \
@@ -309,17 +337,17 @@ jobs:
               --connect-timeout 20 \
               https://apt.llvm.org/llvm-snapshot.gpg.key | \
               sudo tee /etc/apt/keyrings/apt.llvm.org.asc >/dev/null
-            echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble main" | \
-              sudo tee /etc/apt/sources.list.d/llvm-toolchain-noble.list
+            echo "deb [arch=arm64 signed-by=/etc/apt/keyrings/apt.llvm.org.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-$llvm_version main" | \
+              sudo tee "/etc/apt/sources.list.d/llvm-toolchain-noble-$llvm_version.list"
             sudo apt-get -o Acquire::Retries=5 update
             sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
-              clang-23 \
-              libclang-rt-23-dev \
-              lld-23 \
-              llvm-23
-            /usr/lib/llvm-23/bin/clang++ --version
-            /usr/lib/llvm-23/bin/llvm-ar --version
-            runtime_dir="/usr/lib/llvm-23/lib/clang/23/lib"
+              "clang-$llvm_version" \
+              "libclang-rt-$llvm_version-dev" \
+              "lld-$llvm_version" \
+              "llvm-$llvm_version"
+            "/usr/lib/llvm-$llvm_version/bin/clang++" --version
+            "/usr/lib/llvm-$llvm_version/bin/llvm-ar" --version
+            runtime_dir="/usr/lib/llvm-$llvm_version/lib/clang/$llvm_version/lib"
             expected_builtins="$runtime_dir/aarch64-unknown-linux-gnu/libclang_rt.builtins.a"
             actual_builtins="$runtime_dir/linux/libclang_rt.builtins-aarch64.a"
             find "$runtime_dir" -maxdepth 3 -name 'libclang_rt.builtins*' -print
@@ -347,7 +375,18 @@ jobs:
             done
             "$@"
           }
-          retry git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$RUNNER_TEMP/depot_tools"
+          depot_tools_revision="$(git -C "$GITHUB_WORKSPACE/angle" rev-parse HEAD:third_party/depot_tools)"
+          if [[ ! "$depot_tools_revision" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid pinned depot_tools revision: $depot_tools_revision"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/depot_tools"
+          git -C "$RUNNER_TEMP/depot_tools" init -q
+          git -C "$RUNNER_TEMP/depot_tools" remote add origin \
+            https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          retry git -C "$RUNNER_TEMP/depot_tools" fetch --depth 1 origin "$depot_tools_revision"
+          git -C "$RUNNER_TEMP/depot_tools" checkout --detach FETCH_HEAD
+          echo "Pinned depot_tools revision: $depot_tools_revision"
           echo "$RUNNER_TEMP/depot_tools" >> "$GITHUB_PATH"
 
       - name: Configure gclient
@@ -402,42 +441,15 @@ jobs:
             sleep $((attempt * 30))
           done
 
-      - name: Patch Windows ARM64 toolchain debugger copy
-        if: matrix.platform == 'win32' && matrix.arch == 'arm64'
+      - name: Prepare hosted Windows toolchain
+        if: matrix.platform == 'win32'
         shell: bash
         working-directory: angle
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("build/vs_toolchain.py")
-          text = path.read_text(encoding="utf-8")
-          old = """    target_dir = os.path.join(target_dir, 'win_clang_x64')
-              target_cpu = 'x64'
-              runtime_dir = x64_runtime
-              os.makedirs(target_dir, exist_ok=True)
-              _CopyRuntime(target_dir, runtime_dir, target_cpu, debug=False)
-              if configuration == 'Debug':
-                _CopyRuntime(target_dir, runtime_dir, target_cpu, debug=True)
-              _CopyDebugger(target_dir, target_cpu)
-          """
-          new = """    target_dir = os.path.join(target_dir, 'win_clang_x64')
-              target_cpu = 'x64'
-              runtime_dir = x64_runtime
-              os.makedirs(target_dir, exist_ok=True)
-              _CopyRuntime(target_dir, runtime_dir, target_cpu, debug=False)
-              if configuration == 'Debug':
-                _CopyRuntime(target_dir, runtime_dir, target_cpu, debug=True)
-              try:
-                _CopyDebugger(target_dir, target_cpu)
-              except Exception as e:
-                print('Skipping win_clang_x64 debugger DLL copy: %s' % e)
-          """
-          if old not in text:
-            raise SystemExit("Could not locate win_clang_x64 debugger copy block")
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
-          PY
+          python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" prepare-windows-toolchain \
+            --source-root "$PWD" \
+            --arch "${{ matrix.arch }}"
 
       - name: Generate GN args
         shell: bash
@@ -447,6 +459,7 @@ jobs:
           python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" gn-args \
             --platform "${{ matrix.platform }}" \
             --arch "${{ matrix.arch }}" \
+            --clang-version "$LINUX_ARM64_LLVM_VERSION" \
             --output out/Release/args.gn \
             --json-output "$RUNNER_TEMP/gn-args.json"
 
@@ -545,7 +558,7 @@ jobs:
           echo "Skipping runtime smoke for macOS x64 hosted Intel runner"
 
       - name: Upload archive artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: angle-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/artifacts/*
@@ -555,24 +568,24 @@ jobs:
     name: macos-universal
     needs:
       - build
-    runs-on: macos-latest
+    runs-on: macos-15
     if: >-
       needs.build.result == 'success'
     timeout-minutes: 60
     steps:
       - name: Check out workflow repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: repo
 
       - name: Download macOS x64 archive
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: angle-darwin-x64
           path: ${{ runner.temp }}/universal-input/x64
 
       - name: Download macOS arm64 archive
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: angle-darwin-arm64
           path: ${{ runner.temp }}/universal-input/arm64
@@ -634,7 +647,7 @@ jobs:
           echo "Skipping runtime smoke for macOS universal archive"
 
       - name: Upload macOS universal archive artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: angle-darwin-universal
           path: ${{ runner.temp }}/artifacts/*
@@ -646,7 +659,7 @@ jobs:
       - preflight
       - build
       - macos_universal
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: >-
       always() &&
       (
@@ -664,7 +677,7 @@ jobs:
       contents: write
     steps:
       - name: Check out release repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           path: repo
@@ -678,44 +691,8 @@ jobs:
           set -euo pipefail
           echo "Artifact run ID: $ARTIFACT_RUN_ID"
 
-      - name: Resolve release target
-        shell: bash
-        env:
-          ARTIFACT_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.artifact_run_id != '' && inputs.artifact_run_id || '' }}
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_ANGLE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.angle_commit || '' }}
-          PREFLIGHT_BUILD_REF: ${{ needs.preflight.outputs.build_ref }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if [[ -n "$INPUT_ANGLE_COMMIT" ]]; then
-            target_sha="$INPUT_ANGLE_COMMIT"
-          elif [[ -n "$ARTIFACT_RUN_ID" ]]; then
-            run_json="$(
-              curl -fsSL \
-                --retry 5 \
-                --retry-delay 5 \
-                --retry-all-errors \
-                --connect-timeout 20 \
-                -H "Authorization: Bearer $GH_TOKEN" \
-                -H "Accept: application/vnd.github+json" \
-                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID"
-            )"
-            target_sha="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["head_sha"])' <<< "$run_json")"
-          elif [[ "$EVENT_NAME" == "workflow_run" ]]; then
-            target_sha="$PREFLIGHT_BUILD_REF"
-          else
-            target_sha="$GITHUB_SHA"
-          fi
-          if [[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::Invalid release target SHA: $target_sha"
-            exit 1
-          fi
-          echo "Release target: $target_sha"
-          echo "RELEASE_TARGET_SHA=$target_sha" >> "$GITHUB_ENV"
-
       - name: Download archives
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: angle-*
           path: release-assets
@@ -724,12 +701,48 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Validate release assets
+        id: assets
         shell: bash
         run: |
           set -euo pipefail
           python3 repo/.github/scripts/angle_ci.py validate-release-assets \
             --artifact-root release-assets \
-            --expected-commit "$RELEASE_TARGET_SHA"
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Resolve release target
+        shell: bash
+        env:
+          ARTIFACT_COMMIT: ${{ steps.assets.outputs.angle_commit }}
+          ARTIFACT_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.artifact_run_id != '' && inputs.artifact_run_id || '' }}
+          INPUT_ANGLE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.angle_commit || '' }}
+          PREFLIGHT_BUILD_REF: ${{ needs.preflight.outputs.build_ref }}
+        run: |
+          set -euo pipefail
+          target_sha="$ARTIFACT_COMMIT"
+          if [[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid ANGLE commit in release assets: $target_sha"
+            exit 1
+          fi
+          if [[ -n "$INPUT_ANGLE_COMMIT" ]]; then
+            if [[ ! "$INPUT_ANGLE_COMMIT" =~ ^[0-9a-f]{7,40}$ ]]; then
+              echo "::error::Invalid requested ANGLE commit: $INPUT_ANGLE_COMMIT"
+              exit 1
+            fi
+            if [[ "$target_sha" != "$INPUT_ANGLE_COMMIT"* ]]; then
+              echo "::error::Release assets were built from $target_sha, requested $INPUT_ANGLE_COMMIT"
+              exit 1
+            fi
+          fi
+          if [[ -z "$ARTIFACT_RUN_ID" && "$PREFLIGHT_BUILD_REF" != "$target_sha" ]]; then
+            echo "::error::Release assets were built from $target_sha, expected $PREFLIGHT_BUILD_REF"
+            exit 1
+          fi
+          if ! git -C repo cat-file -e "$target_sha^{commit}" 2>/dev/null; then
+            git -C repo fetch --no-tags origin "$target_sha"
+          fi
+          git -C repo cat-file -e "$target_sha^{commit}"
+          echo "Release target: $target_sha"
+          echo "RELEASE_TARGET_SHA=$target_sha" >> "$GITHUB_ENV"
 
       - name: Resolve release tag
         shell: bash

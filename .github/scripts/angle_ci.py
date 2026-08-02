@@ -30,6 +30,9 @@ EXPECTED_RELEASE_ARCHIVES = {
     "win32-x64.zip": ("win32", "x64"),
     "win32-arm64.zip": ("win32", "arm64"),
 }
+DEFAULT_LINUX_ARM64_LLVM_VERSION = "23"
+MIN_WINDOWS_SDK_VERSION = (10, 0, 26100, 0)
+WINDOWS_DEBUGGER_PATCH_MARKER = "ANGLE CI: debugger tools are optional"
 
 COMMON_GN_ARGS = {
     "is_debug": False,
@@ -271,8 +274,11 @@ def write_gn_args(args):
     gn_args = dict(COMMON_GN_ARGS)
     gn_args.update(PLATFORM_GN_ARGS[args.platform])
     if args.platform == "linux" and args.arch == "arm64":
-        gn_args["clang_base_path"] = "/usr/lib/llvm-23"
-        gn_args["clang_version"] = "23"
+        clang_version = args.clang_version
+        if not re.fullmatch(r"[0-9]+", clang_version):
+            raise ValueError(f"Invalid clang version: {clang_version}")
+        gn_args["clang_base_path"] = f"/usr/lib/llvm-{clang_version}"
+        gn_args["clang_version"] = clang_version
         gn_args["is_clang"] = True
         gn_args["target_cpu"] = args.arch
         gn_args["use_sysroot"] = False
@@ -290,6 +296,167 @@ def write_gn_args(args):
         json_output.write_text(json.dumps(gn_args, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     print(output.read_text(encoding="utf-8"))
+
+
+def parse_numeric_version(value):
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){3}", value):
+        raise ValueError(f"Invalid four-part version: {value}")
+    return tuple(int(part) for part in value.split("."))
+
+
+def read_chromium_sdk_version(path):
+    text = Path(path).read_text(encoding="utf-8")
+    matches = re.findall(r"^SDK_VERSION\s*=\s*['\"]([^'\"]+)['\"]\s*$", text, re.MULTILINE)
+    if len(matches) != 1:
+        raise RuntimeError(f"Expected exactly one SDK_VERSION in {path}, found {len(matches)}")
+    parse_numeric_version(matches[0])
+    return matches[0]
+
+
+def replace_chromium_sdk_version(path, old_version, new_version):
+    path = Path(path)
+    text = path.read_text(encoding="utf-8")
+    pattern = re.compile(
+        rf"^(SDK_VERSION\s*=\s*['\"]){re.escape(old_version)}(['\"]\s*)$", re.MULTILINE
+    )
+    updated, count = pattern.subn(rf"\g<1>{new_version}\g<2>", text)
+    if count != 1:
+        raise RuntimeError(f"Could not replace SDK_VERSION in {path}; matches={count}")
+    path.write_text(updated, encoding="utf-8")
+
+
+def installed_windows_sdks(sdk_root):
+    sdk_root = Path(sdk_root)
+    include_root = sdk_root / "Include"
+    if not include_root.is_dir():
+        raise FileNotFoundError(f"Windows SDK include directory not found: {include_root}")
+
+    required = (
+        ("Include", "shared"),
+        ("Include", "ucrt"),
+        ("Include", "um"),
+        ("Lib", "ucrt"),
+        ("Lib", "um"),
+    )
+    versions = []
+    for path in include_root.iterdir():
+        if not path.is_dir():
+            continue
+        try:
+            parsed = parse_numeric_version(path.name)
+        except ValueError:
+            continue
+        if all((sdk_root / category / path.name / component).is_dir() for category, component in required):
+            versions.append((parsed, path.name))
+    return [name for _, name in sorted(versions)]
+
+
+def select_installed_ntddi_macro(sdk_root, sdk_version):
+    header = Path(sdk_root) / "Include" / sdk_version / "shared" / "sdkddkver.h"
+    text = header.read_text(encoding="utf-8", errors="replace")
+    macros = []
+    for name, value in re.findall(
+        r"^\s*#\s*define\s+(NTDDI_WIN11_[A-Z]{2})\s+(0x[0-9A-Fa-f]+)\b",
+        text,
+        re.MULTILINE,
+    ):
+        macros.append((int(value, 16), name))
+    if not macros:
+        raise RuntimeError(f"No Windows 11 NTDDI release macros found in {header}")
+    return max(macros)[1], {name for _, name in macros}
+
+
+def select_installed_windows_sdk(source_root, sdk_root):
+    source_root = Path(source_root)
+    setup_toolchain = source_root / "build" / "toolchain" / "win" / "setup_toolchain.py"
+    vs_toolchain = source_root / "build" / "vs_toolchain.py"
+    win_config = source_root / "build" / "config" / "win" / "BUILD.gn"
+
+    setup_version = read_chromium_sdk_version(setup_toolchain)
+    vs_version = read_chromium_sdk_version(vs_toolchain)
+    if setup_version != vs_version:
+        raise RuntimeError(
+            f"Chromium Windows SDK versions disagree: setup={setup_version}, vs={vs_version}"
+        )
+
+    installed = installed_windows_sdks(sdk_root)
+    if not installed:
+        raise RuntimeError(f"No complete Windows SDK installations found under {sdk_root}")
+    print(f"Chromium requested Windows SDK: {setup_version}")
+    print(f"Installed Windows SDKs: {', '.join(installed)}")
+    if setup_version in installed:
+        selected = setup_version
+        print(f"Using requested Windows SDK {setup_version}")
+    else:
+        selected = installed[-1]
+        if parse_numeric_version(selected) < MIN_WINDOWS_SDK_VERSION:
+            minimum = ".".join(str(part) for part in MIN_WINDOWS_SDK_VERSION)
+            raise RuntimeError(
+                f"Newest installed Windows SDK is {selected}; {minimum} or newer is required"
+            )
+
+        print(f"::warning::Windows SDK {setup_version} is unavailable; using installed SDK {selected}")
+        replace_chromium_sdk_version(setup_toolchain, setup_version, selected)
+        replace_chromium_sdk_version(vs_toolchain, vs_version, selected)
+
+    config_text = win_config.read_text(encoding="utf-8")
+    current_macros = re.findall(r'"NTDDI_VERSION=(NTDDI_[A-Z0-9_]+)"', config_text)
+    if len(current_macros) > 1:
+        raise RuntimeError(f"Expected at most one NTDDI_VERSION in {win_config}")
+    if current_macros:
+        selected_macro, available_macros = select_installed_ntddi_macro(sdk_root, selected)
+        current_macro = current_macros[0]
+        if current_macro not in available_macros:
+            updated = config_text.replace(
+                f'"NTDDI_VERSION={current_macro}"', f'"NTDDI_VERSION={selected_macro}"', 1
+            )
+            win_config.write_text(updated, encoding="utf-8")
+            print(f"Using {selected_macro} instead of unavailable {current_macro}")
+    return selected
+
+
+def make_windows_debugger_tools_optional(source_root):
+    path = Path(source_root) / "build" / "vs_toolchain.py"
+    text = path.read_text(encoding="utf-8")
+    if WINDOWS_DEBUGGER_PATCH_MARKER in text:
+        return True
+
+    function_start = text.find("def _CopyDebugger(")
+    if function_start == -1:
+        print("::warning::Chromium no longer has _CopyDebugger; skipping debugger compatibility patch")
+        return False
+    function_end = text.find("\ndef ", function_start + 1)
+    function_end = len(text) if function_end == -1 else function_end
+    function_text = text[function_start:function_end]
+    anchor = "  win_sdk_dir = SetEnvironmentAndGetSDKDir()\n  if not win_sdk_dir:\n    return\n"
+    if anchor not in function_text:
+        print("::warning::Chromium _CopyDebugger changed; skipping debugger compatibility patch")
+        return False
+
+    replacement = anchor + (
+        f"  # {WINDOWS_DEBUGGER_PATCH_MARKER} for prebuilt release builds.\n"
+        "  debugger_dir = os.path.join(win_sdk_dir, 'Debuggers', target_cpu)\n"
+        "  if not os.path.isfile(os.path.join(debugger_dir, 'dbghelp.dll')):\n"
+        "    print('Skipping missing debugger tools: %s' % debugger_dir)\n"
+        "    return\n"
+    )
+    function_text = function_text.replace(anchor, replacement, 1)
+    path.write_text(text[:function_start] + function_text + text[function_end:], encoding="utf-8")
+    print("Made optional Windows debugger tools non-fatal")
+    return True
+
+
+def prepare_windows_toolchain(args):
+    sdk_root = args.sdk_root
+    if not sdk_root:
+        sdk_root = os.environ.get("WINDOWSSDKDIR")
+    if not sdk_root:
+        program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        sdk_root = str(Path(program_files_x86) / "Windows Kits" / "10")
+    selected = select_installed_windows_sdk(args.source_root, sdk_root)
+    if args.arch == "arm64":
+        make_windows_debugger_tools_optional(args.source_root)
+    print(f"windows-sdk={selected}")
 
 
 def parse_angle_version(source_root, angle_ref):
@@ -999,6 +1166,9 @@ def validate_release_assets(args):
     commit = next(iter(commits))
     if args.expected_commit and commit != args.expected_commit:
         raise RuntimeError(f"Release archives were built from {commit}, expected {args.expected_commit}")
+    if args.github_output:
+        with Path(args.github_output).open("a", encoding="utf-8") as output:
+            output.write(f"angle_commit={commit}\n")
 
     print(f"release-assets ok: version={next(iter(versions))} commit={commit}")
 
@@ -1018,6 +1188,7 @@ def parse_release_asset_name(name):
 
 def self_test(args):
     with tempfile.TemporaryDirectory() as temp:
+        test_windows_toolchain_fallback(Path(temp) / "windows-toolchain")
         pe_path = Path(temp) / "minimal-arm64.dll"
         pe_path.write_bytes(create_minimal_pe(import_name="KERNEL32.dll"))
         imports = read_pe_imports(pe_path)
@@ -1025,13 +1196,75 @@ def self_test(args):
             raise AssertionError(f"Unexpected PE imports: {imports!r}")
         artifact_root = Path(temp) / "release-assets"
         create_minimal_release_archives(artifact_root)
+        github_output = Path(temp) / "github-output"
         validate_release_assets(
             argparse.Namespace(
                 artifact_root=str(artifact_root),
                 expected_commit="0123456789abcdef0123456789abcdef01234567",
+                github_output=str(github_output),
             )
         )
+        if github_output.read_text(encoding="utf-8") != (
+            "angle_commit=0123456789abcdef0123456789abcdef01234567\n"
+        ):
+            raise AssertionError("Release asset commit output is incorrect")
         print("self-test ok")
+
+
+def test_windows_toolchain_fallback(test_root):
+    source_root = test_root / "source"
+    sdk_root = test_root / "sdk"
+    setup_toolchain = source_root / "build" / "toolchain" / "win" / "setup_toolchain.py"
+    vs_toolchain = source_root / "build" / "vs_toolchain.py"
+    win_config = source_root / "build" / "config" / "win" / "BUILD.gn"
+    setup_toolchain.parent.mkdir(parents=True)
+    win_config.parent.mkdir(parents=True)
+    setup_toolchain.write_text("SDK_VERSION = '10.0.28000.0'\n", encoding="utf-8")
+    vs_toolchain.write_text(
+        "SDK_VERSION = '10.0.28000.0'\n\n"
+        "def _CopyDebugger(target_dir, target_cpu):\n"
+        "  win_sdk_dir = SetEnvironmentAndGetSDKDir()\n"
+        "  if not win_sdk_dir:\n"
+        "    return\n"
+        "  copy_debugger(win_sdk_dir, target_dir, target_cpu)\n",
+        encoding="utf-8",
+    )
+    win_config.write_text(
+        'defines = [\n  "NTDDI_VERSION=NTDDI_WIN11_BR",\n]\n', encoding="utf-8"
+    )
+
+    sdk_version = "10.0.26100.0"
+    for category, component in (
+        ("Include", "shared"),
+        ("Include", "ucrt"),
+        ("Include", "um"),
+        ("Lib", "ucrt"),
+        ("Lib", "um"),
+    ):
+        (sdk_root / category / sdk_version / component).mkdir(parents=True, exist_ok=True)
+    (sdk_root / "Include" / sdk_version / "shared" / "sdkddkver.h").write_text(
+        "#define NTDDI_WIN11_ZN 0x0A00000E\n"
+        "#define NTDDI_WIN11_GE 0x0A000010\n",
+        encoding="utf-8",
+    )
+
+    args = argparse.Namespace(
+        source_root=str(source_root), sdk_root=str(sdk_root), arch="arm64"
+    )
+    prepare_windows_toolchain(args)
+    if read_chromium_sdk_version(setup_toolchain) != sdk_version:
+        raise AssertionError("setup_toolchain.py did not select the installed SDK")
+    if read_chromium_sdk_version(vs_toolchain) != sdk_version:
+        raise AssertionError("vs_toolchain.py did not select the installed SDK")
+    if "NTDDI_VERSION=NTDDI_WIN11_GE" not in win_config.read_text(encoding="utf-8"):
+        raise AssertionError("Windows NTDDI fallback was not selected")
+    if WINDOWS_DEBUGGER_PATCH_MARKER not in vs_toolchain.read_text(encoding="utf-8"):
+        raise AssertionError("Windows debugger compatibility patch was not applied")
+
+    first_result = vs_toolchain.read_text(encoding="utf-8")
+    prepare_windows_toolchain(args)
+    if vs_toolchain.read_text(encoding="utf-8") != first_result:
+        raise AssertionError("Windows toolchain preparation is not idempotent")
 
 
 def create_minimal_release_archives(artifact_root):
@@ -1110,7 +1343,14 @@ def main():
     gn.add_argument("--arch", choices=("x64", "arm64"), required=True)
     gn.add_argument("--output", required=True)
     gn.add_argument("--json-output")
+    gn.add_argument("--clang-version", default=DEFAULT_LINUX_ARM64_LLVM_VERSION)
     gn.set_defaults(func=write_gn_args)
+
+    windows_toolchain = subparsers.add_parser("prepare-windows-toolchain")
+    windows_toolchain.add_argument("--source-root", required=True)
+    windows_toolchain.add_argument("--sdk-root")
+    windows_toolchain.add_argument("--arch", choices=("x64", "arm64"), required=True)
+    windows_toolchain.set_defaults(func=prepare_windows_toolchain)
 
     package = subparsers.add_parser("package")
     package.add_argument("--source-root", required=True)
@@ -1155,6 +1395,7 @@ def main():
     release_assets = subparsers.add_parser("validate-release-assets")
     release_assets.add_argument("--artifact-root", required=True)
     release_assets.add_argument("--expected-commit")
+    release_assets.add_argument("--github-output")
     release_assets.set_defaults(func=validate_release_assets)
 
     tests = subparsers.add_parser("self-test")
