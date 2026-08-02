@@ -383,10 +383,22 @@ jobs:
           fi
           mkdir -p "$RUNNER_TEMP/depot_tools"
           git -C "$RUNNER_TEMP/depot_tools" init -q
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            git -C "$RUNNER_TEMP/depot_tools" config core.autocrlf false
+            git -C "$RUNNER_TEMP/depot_tools" config core.filemode false
+          fi
           git -C "$RUNNER_TEMP/depot_tools" remote add origin \
             https://chromium.googlesource.com/chromium/tools/depot_tools.git
           retry git -C "$RUNNER_TEMP/depot_tools" fetch --depth 1 origin "$depot_tools_revision"
           git -C "$RUNNER_TEMP/depot_tools" checkout --detach FETCH_HEAD
+          git -C "$RUNNER_TEMP/depot_tools" diff --exit-code
+          export PATH="$RUNNER_TEMP/depot_tools:$PATH"
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            "$COMSPEC" //c "$(cygpath -w "$RUNNER_TEMP/depot_tools/bootstrap/win_tools.bat")"
+            test -f "$RUNNER_TEMP/depot_tools/git.bat"
+          fi
+          "$RUNNER_TEMP/depot_tools/ensure_bootstrap"
+          test -f "$RUNNER_TEMP/depot_tools/python3_bin_reldir.txt"
           echo "Pinned depot_tools revision: $depot_tools_revision"
           echo "$RUNNER_TEMP/depot_tools" >> "$GITHUB_PATH"
 
