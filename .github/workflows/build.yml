@@ -213,6 +213,10 @@ jobs:
       DEPOT_TOOLS_WIN_TOOLCHAIN: "0"
       GYP_MSVS_VERSION: "2022"
       LINUX_ARM64_LLVM_VERSION: "23"
+      WINDOWS_SDK_PREFERRED_VERSION: "10.0.28000.0"
+      # Windows SDK 10.0.28000.2526, released July 2026.
+      WINDOWS_SDK_INSTALLER_URL: https://download.microsoft.com/download/06fc99ac-527e-451e-a536-8866695a2e7e/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/winsdksetup.exe
+      WINDOWS_SDK_INSTALLER_SHA256: 02988ea51eab2a2db53e19735e51c97a6d221ada74b9174fa0868870b9403ba0
 
     steps:
       - name: Check out workflow repository
@@ -453,6 +457,20 @@ jobs:
             echo "gclient sync attempt $attempt failed; retrying"
             sleep $((attempt * 30))
           done
+
+      - name: Install preferred Windows SDK
+        if: matrix.platform == 'win32'
+        shell: bash
+        working-directory: angle
+        run: |
+          set -euo pipefail
+          python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" install-windows-sdk \
+            --source-root "$PWD" \
+            --version "$WINDOWS_SDK_PREFERRED_VERSION" \
+            --arch "${{ matrix.arch }}" \
+            --installer-url "$WINDOWS_SDK_INSTALLER_URL" \
+            --installer-sha256 "$WINDOWS_SDK_INSTALLER_SHA256" \
+            --download-dir "$RUNNER_TEMP/windows-sdk-installer"
 
       - name: Prepare hosted Windows toolchain
         if: matrix.platform == 'win32'
