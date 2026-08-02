@@ -810,8 +810,10 @@ jobs:
           tag="$RELEASE_TAG"
           cd repo
           git fetch --force origin "+refs/tags/$tag:refs/tags/$tag" || true
+          tag_exists=0
           tag_needs_update=0
           if git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null; then
+            tag_exists=1
             tag_commit="$(git rev-parse "refs/tags/$tag^{commit}")"
             if [[ "$tag_commit" != "$RELEASE_TARGET_SHA" ]]; then
               if [[ "$RELEASE_TAG_EXPLICIT" != "1" ]]; then
@@ -825,34 +827,37 @@ jobs:
           else
             tag_needs_update=1
           fi
+          if [[ "$tag_needs_update" == "1" ]] && \
+             { [[ "$tag_exists" == "1" ]] || [[ "$RELEASE_TARGET_SHA" != "$GITHUB_SHA" ]]; }; then
+            git tag -f "$tag" "$RELEASE_TARGET_SHA"
+            if ! git push --force origin "refs/tags/$tag"; then
+              echo "::error::Could not point tag $tag at $RELEASE_TARGET_SHA. Configure RELEASE_TOKEN with repo and workflow scopes when releasing a commit other than the workflow commit."
+              exit 1
+            fi
+          fi
           cd ..
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
           else
-            create_target="$RELEASE_TARGET_SHA"
-            if [[ "$create_target" != "$GITHUB_SHA" ]]; then
-              create_target="$GITHUB_SHA"
-            fi
             gh release create "$tag" release-assets/* \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$create_target" \
+              --target "$RELEASE_TARGET_SHA" \
               --title "$tag" \
               --notes-file release-notes.md
           fi
-          if [[ "$tag_needs_update" == "1" ]]; then
-            cd repo
-            git tag -f "$tag" "$RELEASE_TARGET_SHA"
-            if ! git push --force origin "refs/tags/$tag"; then
-              echo "::warning::Could not retarget tag $tag to $RELEASE_TARGET_SHA. Configure a RELEASE_TOKEN secret with repo and workflow scopes to let Actions retarget releases to commits that modify workflows."
-            fi
-            cd ..
-          fi
           release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq .id)"
-          if ! gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
-            -f target_commitish="$RELEASE_TARGET_SHA" >/dev/null; then
-            echo "::warning::Could not update release target metadata for $tag to $RELEASE_TARGET_SHA"
+          release_target="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq .target_commitish)"
+          if [[ "$release_target" != "$RELEASE_TARGET_SHA" ]]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              -f target_commitish="$RELEASE_TARGET_SHA" >/dev/null
+          fi
+          release_target="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq .target_commitish)"
+          if [[ "$release_target" != "$RELEASE_TARGET_SHA" ]]; then
+            echo "::error::Release $tag targets $release_target, not $RELEASE_TARGET_SHA"
+            exit 1
           fi
           actual_tag_commit="$(git -C repo ls-remote --tags origin "refs/tags/$tag" | awk '{print $1}')"
           if [[ "$actual_tag_commit" != "$RELEASE_TARGET_SHA" ]]; then
-            echo "::warning::Tag $tag currently points to ${actual_tag_commit:-unknown}, not $RELEASE_TARGET_SHA"
+            echo "::error::Tag $tag points to ${actual_tag_commit:-unknown}, not $RELEASE_TARGET_SHA"
+            exit 1
           fi
