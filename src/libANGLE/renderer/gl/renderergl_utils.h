@@ -129,6 +129,7 @@ void ReInitializeFeaturesAtGPUSwitch(const FunctionsGL *functions, angle::Featur
 namespace nativegl
 {
 bool SupportsVertexArrayObjects(const FunctionsGL *functions);
+bool SupportsVertexAttributeBindings(const FunctionsGL *functions);
 bool SupportsTextureBufferObjects(const FunctionsGL *functions);
 bool SupportsPixelBufferObjects(const FunctionsGL *functions);
 bool SupportsSamplerObjects(const FunctionsGL *functions);
@@ -170,6 +171,7 @@ bool SupportsShaderIOBlocks(const FunctionsGL *functions);
 bool SupportsClipCullDistance(const FunctionsGL *functions);
 bool SupportsSampleMask(const FunctionsGL *functions);
 bool SupportsRasterizerDiscard(const FunctionsGL *functions);
+bool SupportsInstancing(const FunctionsGL *functions);
 bool SupportsNativeRendering(const FunctionsGL *functions,
                              gl::TextureType type,
                              GLenum internalFormat);

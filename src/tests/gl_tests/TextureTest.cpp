@@ -12367,6 +12367,33 @@ TEST_P(TextureAnisotropyTest, AnisotropyFunctional)
     EXPECT_PIXEL_COLOR_EQ(getWindowWidth() - 1, getWindowHeight() - 1, GLColor::red);
 }
 
+// Tests that setting invalid anisotropy values (like NaN) generates GL_INVALID_VALUE error.
+TEST_P(TextureAnisotropyTest, AnisotropyValidation)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_texture_filter_anisotropic"));
+
+    uploadTexture();
+
+    // Check that < 1.0f generates GL_INVALID_VALUE
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 0.5f);
+    EXPECT_GL_ERROR(GL_INVALID_VALUE);
+
+    // Check that NaN generates GL_INVALID_VALUE
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT,
+                    std::numeric_limits<float>::quiet_NaN());
+    EXPECT_GL_ERROR(GL_INVALID_VALUE);
+
+    // Check that > MAX generates GL_INVALID_VALUE
+    GLfloat maxValue = 0.0f;
+    glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxValue);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, maxValue + 1.0f);
+    EXPECT_GL_ERROR(GL_INVALID_VALUE);
+
+    // Check that valid value does not generate error
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, maxValue);
+    EXPECT_GL_NO_ERROR();
+}
+
 // GL_OES_texture_border_clamp
 class TextureBorderClampTest : public Texture2DTest
 {
@@ -16636,6 +16663,55 @@ TEST_P(TextureCubeTestES32, ValidateCubeMapArrayTexImage)
                  nullptr);
     glTexImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, 8, GL_RGBA, 1, 1, 24, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                  nullptr);
+    EXPECT_GL_NO_ERROR();
+}
+
+// Test that cube map array texture base level and max level are clamped.
+TEST_P(TextureCubeTestES32, CubeMapArrayBaseLevelOutOfRange)
+{
+    // Create a program with samplerCubeArray.
+    const char *essl32_fs =
+        R"(#version 320 es
+        precision highp float;
+        precision highp samplerCubeArray;
+        out vec4 my_FragColor;
+        uniform samplerCubeArray texCubeArray;
+        void main()
+        {
+            my_FragColor = texture(texCubeArray, vec4(0.0, 0.0, 0.0, 0.0));
+        })";
+
+    const char *essl32_vs =
+        R"(#version 320 es
+        in vec4 position;
+        void main()
+        {
+            gl_Position = position;
+        })";
+
+    ANGLE_GL_PROGRAM(program, essl32_vs, essl32_fs);
+    glUseProgram(program);
+    GLint textureLocation = glGetUniformLocation(program, "texCubeArray");
+    ASSERT_NE(-1, textureLocation);
+    glUniform1i(textureLocation, 0);
+
+    GLTexture cubeMapArrayTexture;
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, cubeMapArrayTexture);
+
+    // Define level 0.
+    glTexImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_RGBA8, 2, 2, 6, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 nullptr);
+
+    // Set wild base/max level.
+    glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_BASE_LEVEL, 10000);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAX_LEVEL, 10000);
+
+    EXPECT_GL_NO_ERROR();
+
+    // Draw to trigger syncState.
+    drawQuad(program, "position", 0.5f);
+
     EXPECT_GL_NO_ERROR();
 }
 
@@ -22025,6 +22101,7 @@ in vec4 position;
 void main()
 {
     gl_Position = position;
+    gl_PointSize = 1.0;
 })";
 
     // Fragment shader loads from 4 unbound image units and writes results into an SSBO.

@@ -580,7 +580,7 @@ GLint LimitToIntAnd(const LargerInt physicalDeviceValue, const uint64_t cap)
 bool TextureHasAnyRedefinedLevels(const gl::CubeFaceArray<gl::TexLevelMask> &redefinedLevels);
 bool IsTextureLevelRedefined(const gl::CubeFaceArray<gl::TexLevelMask> &redefinedLevels,
                              gl::TextureType textureType,
-                             gl::SourceLevel level);
+                             gl::OwnerLevel level);
 
 enum class TextureLevelDefinition
 {
@@ -602,13 +602,13 @@ bool TextureRedefineLevel(const TextureLevelAllocation levelAllocation,
                           const TextureLevelDefinition levelDefinition,
                           bool immutableFormat,
                           uint32_t levelCount,
-                          const gl::SourceImageIndex &index,
-                          gl::SourceLevel imageFirstAllocatedLevel,
+                          const gl::OwnerImageIndex &index,
+                          gl::OwnerLevel imageFirstAllocatedLevel,
                           gl::CubeFaceArray<gl::TexLevelMask> *redefinedLevels);
 
-void TextureRedefineGenerateMipmapLevels(gl::SourceLevel baseLevel,
-                                         gl::SourceLevel maxLevel,
-                                         gl::SourceLevel firstGeneratedLevel,
+void TextureRedefineGenerateMipmapLevels(gl::OwnerLevel baseLevel,
+                                         gl::OwnerLevel maxLevel,
+                                         gl::OwnerLevel firstGeneratedLevel,
                                          gl::CubeFaceArray<gl::TexLevelMask> *redefinedLevels);
 
 enum class ImageMipLevels
@@ -641,6 +641,12 @@ inline size_t PackSampleCount(int32_t sampleCount)
     ASSERT(1 <= sampleCount && sampleCount <= 16);
     ASSERT(gl::isPow2(sampleCount));
     return gl::ScanForward(static_cast<uint32_t>(sampleCount));
+}
+
+inline GLuint GetMultiviewAdjustedDivisor(int numViews, GLuint divisor)
+{
+    uint64_t adjusted = static_cast<uint64_t>(numViews) * static_cast<uint64_t>(divisor);
+    return static_cast<GLuint>(std::min<uint64_t>(adjusted, std::numeric_limits<GLuint>::max()));
 }
 
 }  // namespace rx
