@@ -838,8 +838,9 @@ jobs:
           else
             tag_needs_update=1
           fi
-          if [[ "$tag_needs_update" == "1" ]] && \
-             { [[ "$tag_exists" == "1" ]] || [[ "$RELEASE_TARGET_SHA" != "$GITHUB_SHA" ]]; }; then
+          # gh release create --target creates a missing tag at the requested
+          # commit. An explicit push is only needed to move an existing tag.
+          if [[ "$tag_exists" == "1" && "$tag_needs_update" == "1" ]]; then
             git tag -f "$tag" "$RELEASE_TARGET_SHA"
             if ! git push --force origin "refs/tags/$tag"; then
               echo "::error::Could not point tag $tag at $RELEASE_TARGET_SHA. Configure RELEASE_TOKEN with repo and workflow scopes when releasing a commit other than the workflow commit."
