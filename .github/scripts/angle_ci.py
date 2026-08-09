@@ -295,6 +295,12 @@ def write_gn_args(args):
     else:
         gn_args["target_cpu"] = args.arch
 
+    if args.platform == "win32" and args.arch == "x64":
+        # The Siso version pinned in DEPS cannot handle SDK dependencies on C:
+        # when the GitHub Actions workspace is on D:. Upstream fixed this in
+        # build.git 37d5865019489e6419134801baa234732fb7fec0.
+        gn_args["use_siso"] = False
+
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     lines = [f"{key} = {format_gn_value(gn_args[key])}" for key in sorted(gn_args)]

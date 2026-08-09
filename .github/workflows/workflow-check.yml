@@ -37,3 +37,8 @@ jobs:
                 --output "$tmp/$platform-$arch.args.gn" \
                 --json-output "$tmp/$platform-$arch.args.json" >/dev/null
           done
+          grep -Fxq 'use_siso = false' "$tmp/win32-x64.args.gn"
+          if grep -Fq 'use_siso' "$tmp/win32-arm64.args.gn"; then
+            echo "::error::Siso workaround must remain limited to Windows x64"
+            exit 1
+          fi
