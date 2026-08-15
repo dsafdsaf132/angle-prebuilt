@@ -27,7 +27,6 @@ class TStructure;
 class TSymbol;
 class TVariable;
 class TIntermSymbol;
-class TSymbolTable;
 
 class TField : angle::NonCopyable
 {
@@ -349,18 +348,15 @@ class TType
 
     bool isStructSpecifier() const { return mIsStructSpecifier; }
 
+    // Whether matrix packing is applicable to this type.  Other types should not have a matrix
+    // packing.
+    bool isMatrixPackingApplicable() const { return isMatrix() || isStructureContainingMatrices(); }
+
     // Return true if variables of this type should be replaced with an inline constant value if
     // such is available. False will be returned in cases where output doesn't support
     // TIntermConstantUnion nodes of the type, or if the type contains a lot of fields and creating
     // several copies of it in the output code is undesirable for performance.
     bool canReplaceWithConstantUnion() const;
-
-    // The char arrays passed in must be pool allocated or static.
-    void createSamplerSymbols(const ImmutableString &namePrefix,
-                              const TString &apiNamePrefix,
-                              TVector<const TVariable *> *outputSymbols,
-                              TMap<const TVariable *, TString> *outputSymbolsToAPINames,
-                              TSymbolTable *symbolTable) const;
 
     // Initializes all lazily-initialized members.
     void realize();

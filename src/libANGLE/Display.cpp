@@ -47,6 +47,10 @@
 #include "libANGLE/renderer/ImageImpl.h"
 #include "libANGLE/trace.h"
 
+#if defined(ANGLE_USE_X11) || defined(ANGLE_USE_WAYLAND)
+#    include "common/linux/window_system.h"
+#endif
+
 #if defined(ANGLE_PLATFORM_APPLE)
 #    include <dispatch/dispatch.h>
 #    include "common/tls.h"
@@ -428,27 +432,38 @@ EGLAttrib GetDeviceTypeFromEnvironment()
 
 EGLAttrib GetPlatformTypeFromEnvironment()
 {
-#if defined(ANGLE_USE_OZONE)
-    return 0;
-#elif defined(ANGLE_USE_X11) && defined(ANGLE_USE_WAYLAND)
-    // EGL 1.4 eglGetDisplay() carries no platform attribute, so consult
-    // WAYLAND_DISPLAY to break the tie between the two backends.
-    if (!angle::GetEnvironmentVar("WAYLAND_DISPLAY").empty())
+#if defined(ANGLE_USE_X11) || defined(ANGLE_USE_WAYLAND)
+    // Reached when the caller supplied no native platform type, as EGL 1.4
+    // eglGetDisplay() cannot. Delegate to the shared policy so this implicit
+    // choice agrees with the util window layer (common/linux/window_system.h).
+#    if defined(ANGLE_USE_X11)
+    constexpr bool kX11Compiled = true;
+#    else
+    constexpr bool kX11Compiled = false;
+#    endif
+#    if defined(ANGLE_USE_WAYLAND)
+    constexpr bool kWaylandCompiled = true;
+#    else
+    constexpr bool kWaylandCompiled = false;
+#    endif
+    switch (angle::ChoosePreferredWindowSystem(kX11Compiled, kWaylandCompiled,
+                                               angle::GetWindowSystemFromEnvironment()))
     {
-        return EGL_PLATFORM_WAYLAND_EXT;
+        case angle::WindowSystem::X11:
+            return EGL_PLATFORM_X11_EXT;
+        case angle::WindowSystem::Wayland:
+            return EGL_PLATFORM_WAYLAND_EXT;
+        case angle::WindowSystem::Unspecified:
+            break;
     }
-    return EGL_PLATFORM_X11_EXT;
-#elif defined(ANGLE_USE_X11)
-    return EGL_PLATFORM_X11_EXT;
-#elif defined(ANGLE_USE_WAYLAND)
-    return EGL_PLATFORM_WAYLAND_EXT;
+    return 0;
 #elif defined(ANGLE_USE_VULKAN_DISPLAY) && defined(ANGLE_VULKAN_DISPLAY_MODE_SIMPLE)
     return EGL_PLATFORM_VULKAN_DISPLAY_MODE_SIMPLE_ANGLE;
 #elif defined(ANGLE_USE_VULKAN_DISPLAY) && defined(ANGLE_VULKAN_DISPLAY_MODE_HEADLESS)
     return EGL_PLATFORM_VULKAN_DISPLAY_MODE_HEADLESS_ANGLE;
 #else
     return 0;
-#endif  // defined(ANGLE_USE_OZONE)
+#endif
 }
 
 EGLAttrib GetPlatformTypeFromAttribs(EGLenum platform, const AttributeMap &attribMap)
@@ -1819,6 +1834,8 @@ Error Display::makeCurrent(Thread *thread,
     {
         ScopedContextMutexLock lock(context != nullptr ? &context->getContextMutex() : nullptr);
 
+        thread->setCurrent(context);
+
         ANGLE_TRY(mImplementation->makeCurrent(this, drawSurface, readSurface, context));
 
         if (context != nullptr)
@@ -1829,8 +1846,6 @@ Error Display::makeCurrent(Thread *thread,
                 context->addRef();
             }
         }
-
-        thread->setCurrent(context);
     }
 
     // Tick all the scratch buffers to make sure they get cleaned up eventually if they stop being
@@ -2429,6 +2444,7 @@ void Display::initializeFrontendFeatures()
 {
     // Enable on all Impls
     ANGLE_FEATURE_CONDITION(&mFrontendFeatures, loseContextOnOutOfMemory, true);
+    ANGLE_FEATURE_CONDITION(&mFrontendFeatures, loseHardenedContextOnBackendError, true);
     ANGLE_FEATURE_CONDITION(&mFrontendFeatures, allowCompressedFormats, true);
 
     // If this feature is enabled, the context can be created with a certain requested version
