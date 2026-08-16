@@ -5,6 +5,7 @@
 # found in the LICENSE file.
 
 import argparse
+import ast
 import datetime
 import json
 import os
@@ -613,27 +614,87 @@ def make_windows_debugger_tools_optional(source_root):
     if WINDOWS_DEBUGGER_PATCH_MARKER in text:
         return True
 
-    function_start = text.find("def _CopyDebugger(")
-    if function_start == -1:
-        print("::warning::Chromium no longer has _CopyDebugger; skipping debugger compatibility patch")
-        return False
-    function_end = text.find("\ndef ", function_start + 1)
-    function_end = len(text) if function_end == -1 else function_end
-    function_text = text[function_start:function_end]
-    anchor = "  win_sdk_dir = SetEnvironmentAndGetSDKDir()\n  if not win_sdk_dir:\n    return\n"
-    if anchor not in function_text:
-        print("::warning::Chromium _CopyDebugger changed; skipping debugger compatibility patch")
+    try:
+        tree = ast.parse(text, filename=str(path))
+    except SyntaxError as error:
+        print(f"::warning::Cannot parse Chromium vs_toolchain.py: {error}")
         return False
 
-    replacement = anchor + (
-        f"  # {WINDOWS_DEBUGGER_PATCH_MARKER} for prebuilt release builds.\n"
-        "  debugger_dir = os.path.join(win_sdk_dir, 'Debuggers', target_cpu)\n"
-        "  if not os.path.isfile(os.path.join(debugger_dir, 'dbghelp.dll')):\n"
-        "    print('Skipping missing debugger tools: %s' % debugger_dir)\n"
-        "    return\n"
+    functions = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "_CopyDebugger"
+    ]
+    if not functions:
+        if "dbghelp.dll" not in text:
+            print("Chromium no longer copies Windows debugger tools; no compatibility patch needed")
+            return True
+        print("::warning::Chromium debugger copying changed; refusing an unsafe source patch")
+        return False
+    if len(functions) != 1:
+        print("::warning::Found multiple Chromium _CopyDebugger functions")
+        return False
+
+    function = functions[0]
+    named_args = [*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs]
+    if not any(argument.arg == "target_cpu" for argument in named_args):
+        print("::warning::Chromium _CopyDebugger no longer accepts target_cpu")
+        return False
+    gets_sdk_dir = any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "SetEnvironmentAndGetSDKDir"
+        for node in ast.walk(function)
     )
-    function_text = function_text.replace(anchor, replacement, 1)
-    path.write_text(text[:function_start] + function_text + text[function_end:], encoding="utf-8")
+    if not gets_sdk_dir:
+        print("::warning::Chromium _CopyDebugger no longer uses the expected SDK lookup")
+        return False
+    if not function.body:
+        print("::warning::Chromium _CopyDebugger has no body")
+        return False
+
+    first_statement = function.body[0]
+    has_docstring = (
+        isinstance(first_statement, ast.Expr)
+        and isinstance(first_statement.value, ast.Constant)
+        and isinstance(first_statement.value.value, str)
+    )
+    if has_docstring:
+        insertion_line = first_statement.end_lineno
+        indent_node = function.body[1] if len(function.body) > 1 else first_statement
+    else:
+        insertion_line = first_statement.lineno - 1
+        indent_node = first_statement
+
+    lines = text.splitlines(keepends=True)
+    indent_line = lines[indent_node.lineno - 1]
+    body_indent = indent_line[: len(indent_line) - len(indent_line.lstrip(" \t"))]
+    if "\t" in body_indent:
+        print("::warning::Chromium _CopyDebugger uses unsupported tab indentation")
+        return False
+    nested_indent = body_indent + "    "
+    patch = (
+        f"{body_indent}# {WINDOWS_DEBUGGER_PATCH_MARKER} for prebuilt release builds.\n"
+        f"{body_indent}import os as _angle_ci_os\n"
+        f"{body_indent}_angle_ci_sdk_dir = SetEnvironmentAndGetSDKDir()\n"
+        f"{body_indent}if _angle_ci_sdk_dir:\n"
+        f"{nested_indent}_angle_ci_debugger_dir = _angle_ci_os.path.join(\n"
+        f"{nested_indent}    _angle_ci_sdk_dir, 'Debuggers', target_cpu)\n"
+        f"{nested_indent}if not _angle_ci_os.path.isfile(\n"
+        f"{nested_indent}        _angle_ci_os.path.join(_angle_ci_debugger_dir, 'dbghelp.dll')):\n"
+        f"{nested_indent}    print('Skipping missing debugger tools: %s' % _angle_ci_debugger_dir)\n"
+        f"{nested_indent}    return\n"
+    )
+    lines.insert(insertion_line, patch)
+    patched_text = "".join(lines)
+    try:
+        ast.parse(patched_text, filename=str(path))
+    except SyntaxError as error:
+        print(f"::warning::Generated Chromium debugger patch is invalid: {error}")
+        return False
+
+    path.write_text(patched_text, encoding="utf-8")
     print("Made optional Windows debugger tools non-fatal")
     return True
 
@@ -641,8 +702,8 @@ def make_windows_debugger_tools_optional(source_root):
 def prepare_windows_toolchain(args):
     sdk_root = windows_sdk_root(args.sdk_root)
     selected = select_installed_windows_sdk(args.source_root, sdk_root, args.arch)
-    if args.arch == "arm64":
-        make_windows_debugger_tools_optional(args.source_root)
+    if args.arch == "arm64" and not make_windows_debugger_tools_optional(args.source_root):
+        raise RuntimeError("Chromium Windows debugger copying could not be safely adapted")
     print(f"windows-sdk={selected}")
 
 
@@ -1456,10 +1517,11 @@ def test_exact_windows_toolchain(test_root):
     vs_toolchain.write_text(
         f"SDK_VERSION = '{requested_version}'\n\n"
         "def _CopyDebugger(target_dir, target_cpu):\n"
-        "  win_sdk_dir = SetEnvironmentAndGetSDKDir()\n"
-        "  if not win_sdk_dir:\n"
-        "    return\n"
-        "  copy_debugger(win_sdk_dir, target_dir, target_cpu)\n",
+        "    \"\"\"Copy debugger files when the SDK provides them.\"\"\"\n"
+        "    win_sdk_dir = SetEnvironmentAndGetSDKDir()\n"
+        "    if not win_sdk_dir:\n"
+        "        return\n"
+        "    copy_debugger(win_sdk_dir, target_dir, target_cpu)\n",
         encoding="utf-8",
     )
     win_config.write_text(
@@ -1497,6 +1559,37 @@ def test_exact_windows_toolchain(test_root):
         raise AssertionError("Upstream Windows NTDDI macro was modified")
     if WINDOWS_DEBUGGER_PATCH_MARKER not in vs_toolchain.read_text(encoding="utf-8"):
         raise AssertionError("Windows debugger compatibility patch was not applied")
+
+    debugger_root = test_root / "debuggers"
+    (debugger_root / "Debuggers" / "arm64").mkdir(parents=True)
+    (debugger_root / "Debuggers" / "arm64" / "dbghelp.dll").write_bytes(b"test\n")
+    copied_debuggers = []
+    namespace = {
+        "SetEnvironmentAndGetSDKDir": lambda: str(debugger_root),
+        "copy_debugger": lambda *values: copied_debuggers.append(values),
+    }
+    exec(vs_toolchain.read_text(encoding="utf-8"), namespace)
+    namespace["_CopyDebugger"]("output", "x64")
+    if copied_debuggers:
+        raise AssertionError("Missing x64 debugger tools were not skipped")
+    namespace["_CopyDebugger"]("output", "arm64")
+    if len(copied_debuggers) != 1 or copied_debuggers[0][2] != "arm64":
+        raise AssertionError("Available arm64 debugger tools were skipped")
+
+    legacy_source_root = test_root / "legacy-debugger-indent"
+    legacy_toolchain = legacy_source_root / "build" / "vs_toolchain.py"
+    legacy_toolchain.parent.mkdir(parents=True)
+    legacy_toolchain.write_text(
+        "def _CopyDebugger(target_dir, target_cpu):\n"
+        "  win_sdk_dir = SetEnvironmentAndGetSDKDir()\n"
+        "  if not win_sdk_dir:\n"
+        "    return\n"
+        "  copy_debugger(win_sdk_dir, target_dir, target_cpu)\n",
+        encoding="utf-8",
+    )
+    if not make_windows_debugger_tools_optional(legacy_source_root):
+        raise AssertionError("Two-space Chromium debugger function was not adapted")
+    ast.parse(legacy_toolchain.read_text(encoding="utf-8"))
 
     first_result = vs_toolchain.read_text(encoding="utf-8")
     prepare_windows_toolchain(args)
