@@ -21,9 +21,9 @@
 
 #include "clspv/Compiler.h"
 
-#include "vulkan/vulkan_core.h"
-
 #include "spirv/unified1/NonSemanticClspvReflection.h"
+
+#include "vulkan/vulkan_core.h"
 
 namespace rx
 {
@@ -32,34 +32,6 @@ class CLProgramVk : public CLProgramImpl
 {
   public:
     using Ptr = std::unique_ptr<CLProgramVk>;
-    // TODO: Look into moving this information in CLKernelArgument
-    // https://anglebug.com/378514267
-    struct ImagePushConstant
-    {
-        VkPushConstantRange pcRange;
-        uint32_t ordinal;
-    };
-    struct SpvReflectionData
-    {
-        angle::HashMap<uint32_t, uint32_t> spvIntLookup;
-        angle::HashMap<uint32_t, std::string> spvStrLookup;
-        angle::HashMap<uint32_t, CLKernelVk::ArgInfo> kernelArgInfos;
-        angle::HashMap<std::string, uint32_t> kernelFlags;
-        angle::HashMap<std::string, std::string> kernelAttributes;
-        angle::HashMap<std::string, std::array<uint32_t, 3>> kernelCompileWorkgroupSize;
-        angle::HashMap<uint32_t, VkPushConstantRange> pushConstants;
-        angle::PackedEnumMap<SpecConstantType, uint32_t> specConstantIDs;
-        angle::PackedEnumBitSet<SpecConstantType, uint32_t> specConstantsUsed;
-        angle::HashMap<uint32_t, std::vector<ImagePushConstant>> imagePushConstants;
-        CLKernelArgsMap kernelArgsMap;
-        angle::HashMap<std::string, CLKernelArgument> kernelArgMap;
-        angle::HashSet<uint32_t> kernelIDs;
-        ClspvPrintfBufferStorage printfBufferStorage;
-        angle::HashMap<uint32_t, ClspvPrintfInfo> printfInfoMap;
-        std::vector<ClspvLiteralSampler> literalSamplers;
-        ClspvConstantDataBufferInfo constantDataBufferInfo;
-        ClspvWorkgroupVariableSize workgroupVariableSize;
-    };
 
     // Output binary structure (for CL_PROGRAM_BINARIES query)
     static constexpr uint32_t kBinaryVersion = 2;
@@ -108,7 +80,7 @@ class CLProgramVk : public CLProgramImpl
         std::vector<char> IR;
         std::string buildLog;
         angle::spirv::Blob binary;
-        SpvReflectionData reflectionData;
+        ClspvReflectionData reflectionData;
         VkPushConstantRange pushConstRange{};
         cl_build_status buildStatus{CL_BUILD_NONE};
         cl_program_binary_type binaryType{CL_PROGRAM_BINARY_TYPE_NONE};
@@ -329,14 +301,13 @@ class CLProgramVk : public CLProgramImpl
     const DeviceProgramData *getDeviceProgramData(const _cl_device_id *device) const;
     CLPlatformVk *getPlatform() { return mContext->getPlatform(); }
     const vk::ShaderModulePtr &getShaderModule() const { return mShader; }
-    cl::MemoryPtr getOrCreateModuleConstantDataBuffer(const std::string &kernelName);
+    cl::BufferPtr getOrCreateModuleConstantDataBuffer(const std::string &kernelName);
 
     bool buildInternal(const cl::DevicePtrs &devices,
                        std::string options,
                        std::string internalOptions,
                        BuildType buildType,
                        const LinkProgramsList &LinkProgramsList);
-    angle::spirv::Blob stripReflection(const DeviceProgramData *deviceProgramData);
 
     // Sets the status for given associated device programs
     void setBuildStatus(const cl::DevicePtrs &devices, cl_build_status status);
@@ -351,7 +322,7 @@ class CLProgramVk : public CLProgramImpl
     DevicePrograms mAssociatedDevicePrograms;
     angle::SimpleMutex mProgramMutex;
     std::shared_ptr<angle::WaitableEvent> mAsyncBuildEvent;
-    cl::MemoryPtr mModuleConstantDataBuffer;
+    cl::BufferPtr mModuleConstantDataBuffer;
 };
 
 class CLAsyncBuildTask : public angle::Closure

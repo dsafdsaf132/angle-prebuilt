@@ -1121,20 +1121,9 @@ TracePerfTest::TracePerfTest(std::unique_ptr<const TracePerfParams> params)
         addExtensionPrerequisite("GL_KHR_texture_compression_astc_ldr");
     }
 
-    if (traceNameIs("pokemon_go"))
-    {
-        addExtensionPrerequisite("GL_EXT_texture_cube_map_array");
-        addExtensionPrerequisite("GL_KHR_texture_compression_astc_ldr");
-    }
-
     if (traceNameIs("cookie_run_kingdom"))
     {
         addExtensionPrerequisite("GL_OES_EGL_image_external");
-    }
-
-    if (traceNameIs("pubg_mobile_skydive") || traceNameIs("pubg_mobile_battle_royale"))
-    {
-        addExtensionPrerequisite("GL_EXT_texture_buffer");
     }
 
     if (traceNameIs("scrabble_go"))
