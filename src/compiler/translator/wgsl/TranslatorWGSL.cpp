@@ -8,6 +8,7 @@
 #include "common/unsafe_buffers.h"
 
 #include <iostream>
+#include <string_view>
 #include <variant>
 
 #include "GLSLANG/ShaderLang.h"
@@ -1630,10 +1631,10 @@ void OutputWGSLTraverser::emitTextureBuiltin(const TOperator op, const TIntermSe
     ImmutableString wgslTextureVarName("");
     ImmutableString wgslSamplerVarName("");
 
-    constexpr char k2DCoordsSwizzle[] = ".xy";
-    constexpr char k3DCoordsSwizzle[] = ".xyz";
+    constexpr std::string_view k2DCoordsSwizzle = ".xy";
+    constexpr std::string_view k3DCoordsSwizzle = ".xyz";
 
-    constexpr char kPossibleElems[] = "xyzw";
+    constexpr std::string_view kPossibleElems = "xyzw";
 
     // MonomorphizeUnsupportedFunctions() and RewriteStructSamplers() ensure that this is a
     // reference to the global sampler.
@@ -1862,8 +1863,8 @@ void OutputWGSLTraverser::emitTextureBuiltin(const TOperator op, const TIntermSe
             ASSERT(pIndex == 1);
             const uint8_t vecSize = args[pIndex]->getAsTyped()->getNominalSize();
             ASSERT(vecSize == 3 || vecSize == 4);
-            projectionDivisionSwizzle = BuildConcatenatedImmutableString(
-                '.', ANGLE_UNSAFE_TODO(kPossibleElems[vecSize - 1]));
+            projectionDivisionSwizzle =
+                BuildConcatenatedImmutableString('.', kPossibleElems[vecSize - 1]);
         }
 
         // If sampling from an array, set the swizzle that extracts the array layer number from the
@@ -1888,18 +1889,17 @@ void OutputWGSLTraverser::emitTextureBuiltin(const TOperator op, const TIntermSe
                 elemIndex = 3;
             }
 
-            depthRefSwizzle =
-                BuildConcatenatedImmutableString('.', ANGLE_UNSAFE_TODO(kPossibleElems[elemIndex]));
+            depthRefSwizzle = BuildConcatenatedImmutableString('.', kPossibleElems[elemIndex]);
         }
 
         // Finally, set the swizzle for extracting coordinates from the p vector.
         if (IsSampler2D(samplerType) || IsSampler2DArray(samplerType))
         {
-            coordsSwizzle = ImmutableString(k2DCoordsSwizzle);
+            coordsSwizzle = ImmutableString(k2DCoordsSwizzle.data(), k2DCoordsSwizzle.size());
         }
         else if (IsSampler3D(samplerType) || IsSamplerCube(samplerType))
         {
-            coordsSwizzle = ImmutableString(k3DCoordsSwizzle);
+            coordsSwizzle = ImmutableString(k3DCoordsSwizzle.data(), k3DCoordsSwizzle.size());
         }
     }
 
@@ -2729,7 +2729,7 @@ bool TranslatorWGSL::preTranslateTreeModifications(TIntermBlock *root,
 
     // TODO(anglebug.com/42267100): just use the struct mode to avoid a rewrite of the interface
     // block by ReduceInterfaceBlocks into a struct.
-    DriverUniform driverUniforms(DriverUniformMode::InterfaceBlock);
+    DriverUniform driverUniforms(DriverUniformMode::InterfaceBlock, SH_WGSL_OUTPUT);
     ASSERT(getShaderType() != GL_COMPUTE_SHADER);
     driverUniforms.addGraphicsDriverUniformsToShader(root, &getSymbolTable());
 
@@ -2771,6 +2771,15 @@ bool TranslatorWGSL::preTranslateTreeModifications(TIntermBlock *root,
         {
             return false;
         }
+
+        if (aggregateTypesUsedForUniforms > 0)
+        {
+            // Requires MonomorphizeUnsupportedFunctions() to have been run already.
+            if (!RewriteStructSamplers(this, root, &getSymbolTable()))
+            {
+                return false;
+            }
+        }
     }
     else
     {
@@ -2802,15 +2811,6 @@ bool TranslatorWGSL::preTranslateTreeModifications(TIntermBlock *root,
 
         // Replace root's sequence with |replacement|.
         root->replaceAllChildren(std::move(replacement));
-    }
-
-    if (aggregateTypesUsedForUniforms > 0)
-    {
-        // Requires MonomorphizeUnsupportedFunctions() to have been run already.
-        if (!RewriteStructSamplers(this, root, &getSymbolTable()))
-        {
-            return false;
-        }
     }
 
     // Replace array of array of opaque uniforms with a flattened array.  This is run after
