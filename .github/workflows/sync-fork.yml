@@ -63,17 +63,33 @@ jobs:
           retry git fetch origin "$TARGET_BRANCH"
           retry git fetch upstream "$UPSTREAM_REF"
 
-          upstream_commit="$(git rev-parse FETCH_HEAD)"
-          upstream_position="$(git rev-list "$upstream_commit" --count)"
+          upstream_head="$(git rev-parse FETCH_HEAD)"
           current_commit="$(git rev-parse HEAD)"
           echo "Target branch: $TARGET_BRANCH"
           echo "Current fork commit: $current_commit"
           echo "Upstream ref: $UPSTREAM_REF"
-          echo "Upstream commit: $upstream_commit"
-          echo "Upstream commit position: $upstream_position"
+          echo "Upstream HEAD: $upstream_head"
+
+          selection_file="$(mktemp)"
+          python3 .github/scripts/select_upstream_commit.py \
+            --source-root "$PWD" \
+            --upstream-head "$upstream_head" \
+            --result-file "$selection_file"
+          # The helper writes shell-safe, fixed-name assignments only.
+          source "$selection_file"
+
+          if [[ -z "$selected_upstream_commit" ]]; then
+            echo "No upstream commit with completed successful ANGLE CI is available"
+            exit 0
+          fi
+          upstream_commit="$selected_upstream_commit"
+          upstream_position="$(git rev-list "$upstream_commit" --count)"
+          echo "Selected upstream commit: $upstream_commit"
+          echo "Selected upstream commit position: $upstream_position"
+          echo "Successful ANGLE CI builds: $selected_ci_build_count"
 
           if git merge-base --is-ancestor "$upstream_commit" HEAD; then
-            echo "Fork already contains upstream commit $upstream_commit"
+            echo "Fork already contains selected upstream commit $upstream_commit"
             exit 0
           fi
 
