@@ -2124,7 +2124,7 @@ void main() {
     GLFramebuffer fbo;
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
-    ASSERT_GLENUM_EQ(GL_FRAMEBUFFER_COMPLETE, glCheckFramebufferStatus(GL_FRAMEBUFFER));
+    ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
     EXPECT_GL_NO_ERROR();
 
     // Clear the texture to 42 to ensure the first test case doesn't accidentally pass
@@ -7154,6 +7154,100 @@ void main()
     EXPECT_PIXEL_NEAR(0, 0, 255, 127, 0, 255, 1);
 }
 
+// Test that sub-4-component fragment outputs zero-initialize missing channels (or keep cleared
+// values on non-widening backends).
+TEST_P(WebGL2GLSLTest, FragmentOutputMissingChannels)
+{
+    // Test 1: out float -> writes R (0.8), G, B, A must be either 0 (widened) or cleared values
+    // (51, 76, 102)
+    {
+        glClearColor(0.1f, 0.2f, 0.3f, 0.4f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        constexpr char kFS[] = R"(#version 300 es
+precision highp float;
+layout(location = 0) out float color;
+void main()
+{
+    color = 0.8;
+})";
+
+        ANGLE_GL_PROGRAM(program, essl3_shaders::vs::Simple(), kFS);
+        drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f, 1.0f, true);
+
+        GLColor pixel;
+        glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, &pixel);
+        EXPECT_GL_NO_ERROR();
+        EXPECT_NEAR(pixel.R, 204, 1);
+        EXPECT_TRUE(pixel.G == 0 || std::abs(pixel.G - 51) <= 1);
+        EXPECT_TRUE(pixel.B == 0 || std::abs(pixel.B - 76) <= 1);
+        EXPECT_TRUE(pixel.A == 0 || std::abs(pixel.A - 102) <= 1);
+    }
+
+    // Test 2: out vec2 -> writes R (0.8), G (0.6), B, A must be either 0 (widened) or cleared
+    // values (76, 102)
+    {
+        glClearColor(0.1f, 0.2f, 0.3f, 0.4f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        constexpr char kFS[] = R"(#version 300 es
+precision highp float;
+layout(location = 0) out vec2 color;
+void main()
+{
+    color = vec2(0.8, 0.6);
+})";
+
+        ANGLE_GL_PROGRAM(program, essl3_shaders::vs::Simple(), kFS);
+        drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f, 1.0f, true);
+
+        GLColor pixel;
+        glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, &pixel);
+        EXPECT_GL_NO_ERROR();
+        EXPECT_NEAR(pixel.R, 204, 1);
+        EXPECT_NEAR(pixel.G, 153, 1);
+        EXPECT_TRUE(pixel.B == 0 || std::abs(pixel.B - 76) <= 1);
+        EXPECT_TRUE(pixel.A == 0 || std::abs(pixel.A - 102) <= 1);
+    }
+
+    // Test 3: out uvec3 -> writes R (12), G (34), B (56), A must be either 0 (widened) or cleared
+    // value (4)
+    {
+        GLTexture tex;
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8UI, getWindowWidth(), getWindowHeight(), 0,
+                     GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, nullptr);
+
+        GLFramebuffer fbo;
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+        ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+        const GLuint clearColor[4] = {1u, 2u, 3u, 4u};
+        glClearBufferuiv(GL_COLOR, 0, clearColor);
+
+        constexpr char kFS[] = R"(#version 300 es
+precision highp int;
+layout(location = 0) out uvec3 color;
+void main()
+{
+    color = uvec3(12u, 34u, 56u);
+})";
+
+        ANGLE_GL_PROGRAM(program, essl3_shaders::vs::Simple(), kFS);
+        drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f, 1.0f, true);
+
+        uint8_t pixel[4] = {};
+        glReadPixels(0, 0, 1, 1, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, pixel);
+        EXPECT_GL_NO_ERROR();
+        EXPECT_EQ(pixel[0], 12);
+        EXPECT_EQ(pixel[1], 34);
+        EXPECT_EQ(pixel[2], 56);
+        EXPECT_TRUE(pixel[3] == 0 || pixel[3] == 4)
+            << " pixel[3]=" << static_cast<uint32_t>(pixel[3]);
+    }
+}
+
 // Verify that functions without return statements return zero-initialized vec4
 TEST_P(WebGL2GLSLTest, MissingReturnZeroInitVec4)
 {
@@ -8981,6 +9075,54 @@ vec4 foo(S structVar)
 void main()
 {
     gl_FragColor = foo(uStruct);
+})";
+
+    ANGLE_GL_PROGRAM(program, essl1_shaders::vs::Simple(), kFragmentShader);
+
+    // Initialize the texture with green.
+    GLTexture tex;
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    GLubyte texData[] = {0u, 255u, 0u, 255u};
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, texData);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    ASSERT_GL_NO_ERROR();
+
+    // Draw
+    glUseProgram(program);
+    GLint samplerMemberLoc = glGetUniformLocation(program, "uStruct.samplerMember");
+    ASSERT_NE(-1, samplerMemberLoc);
+    glUniform1i(samplerMemberLoc, 0);
+    GLint texCoordLoc = glGetUniformLocation(program, "uTexCoord");
+    ASSERT_NE(-1, texCoordLoc);
+    glUniform2f(texCoordLoc, 0.5f, 0.5f);
+
+    drawQuad(program, essl1_shaders::PositionAttrib(), 0.5f);
+    ASSERT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_COLOR_EQ(1, 1, GLColor::green);
+}
+
+// This test covers passing a struct containing a sampler as a function argument with an unnamed
+// and unused argument.
+TEST_P(GLSLTest, StructsWithSamplersAsFunctionArgWithPrototypeAndUnnamedParam)
+{
+    // Shader failed to compile on Android. http://anglebug.com/42260860
+    ANGLE_SKIP_TEST_IF(IsAndroid() && IsAdreno() && IsOpenGLES());
+
+    const char kFragmentShader[] = R"(precision mediump float;
+struct S { sampler2D samplerMember; };
+uniform S uStruct;
+uniform vec2 uTexCoord;
+vec4 foo(S structVar, int);
+vec4 foo(S structVar, int)
+{
+    return texture2D(structVar.samplerMember, uTexCoord);
+}
+void main()
+{
+    gl_FragColor = foo(uStruct, 0);
 })";
 
     ANGLE_GL_PROGRAM(program, essl1_shaders::vs::Simple(), kFragmentShader);
@@ -11680,7 +11822,7 @@ void main()
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
     ASSERT_GL_NO_ERROR();
-    ASSERT_GLENUM_EQ(GL_FRAMEBUFFER_COMPLETE, glCheckFramebufferStatus(GL_FRAMEBUFFER));
+    ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
 
     // Draw to user FBO.
     glClear(GL_COLOR_BUFFER_BIT);
@@ -11776,7 +11918,7 @@ void main()
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
     ASSERT_GL_NO_ERROR();
-    ASSERT_GLENUM_EQ(GL_FRAMEBUFFER_COMPLETE, glCheckFramebufferStatus(GL_FRAMEBUFFER));
+    ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
 
     // Draw to user FBO.
     drawQuad(program, essl1_shaders::PositionAttrib(), 0.5);

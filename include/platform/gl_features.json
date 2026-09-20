@@ -309,13 +309,13 @@
             "issue": "https://crbug.com/705865"
         },
         {
-            "name": "reset_base_level_for_ASTC_sub_image",
+            "name": "reset_base_level_for_ASTC_image",
             "category": "Workarounds",
             "description": [
-                "Reset texture base level before calling glCompressedTexSubImage2D for ASTC textures to ",
+                "Reset texture base level before calling glCompressedTexImage2D or glCompressedTexSubImage2D for ASTC textures to ",
                 "work around PowerVR driver bug."
             ],
-            "issue": "https://crbug.com/528131939"
+            "issue": "https://crbug.com/551708184"
         },
         {
             "name": "recreate_immutable_texture_on_base_level_increase",
@@ -977,7 +977,7 @@
             "description": [
                 "Force a flush before calling generateMipmap to work around driver bugs."
             ],
-            "issue": "http://crbug.com/549350408"
+            "issue": "http://crbug.com/549350408 https://crbug.com/549995090"
         },
         {
             "name": "split_level_0_pbo_full_sub_image_2D",
@@ -1047,10 +1047,10 @@
             "issue": "http://crbug.com/546252753"
         },
         {
-            "name": "use_tex_sub_image_for_host_twiddled_npot_uploads",
+            "name": "use_tex_sub_image_for_client_data_npot_uploads",
             "category": "Workarounds",
             "description": [
-                "For texture formats which would be twiddled on the host CPU, upload via TexSubImage2D instead of TexImage2D."
+                "For non-power-of-two textures, upload via TexSubImage2D instead of TexImage2D when uploading client-side data."
             ],
             "issue": "http://crbug.com/553172761"
         }
