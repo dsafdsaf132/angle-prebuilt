@@ -1,4 +1,4 @@
-# AANGLE Prebuilt
+# ANGLE Prebuilt
 
 This repository tracks upstream [google/ANGLE](https://github.com/google/angle) and publishes ready-to-use archives for
 native EGL/OpenGL ES consumers.
