@@ -67,7 +67,7 @@ def resolve_stable():
         "schemaVersion": 1,
         "channel": "stable",
         "releaseTag": tag,
-        "releaseTitle": f"Stable · Chrome {version} · ANGLE {sha7}",
+        "releaseTitle": f"Stable · Chrome {version}",
         "releaseDate": date,
         "angleRef": "upstream",
         "angleCommit": angle,
@@ -236,6 +236,7 @@ def release_manifests_match(release, expected):
     for manifest in (existing, expected):
         manifest.pop("workflowCommit", None)
         manifest.pop("releaseDate", None)
+        manifest.pop("releaseTitle", None)
     return existing == expected
 
 
@@ -245,11 +246,17 @@ def make_release_notes(manifest, artifact_root):
     names = sorted(path.name for path in Path(artifact_root).iterdir() if path.is_file())
     release_manifest = dict(manifest)
     release_manifest.pop("workflowCommit", None)
+    upstream_url = manifest["sourceUrl"].rstrip("/")
+    if manifest.get("channel") == "stable":
+        upstream_url = (
+            "https://github.com/google/ANGLE/commit/"
+            f"{manifest['upstreamCommit']}"
+        )
     body = [
         f"Release: {manifest['releaseTitle']}",
         f"Tag: `{manifest['releaseTag']}`",
         "",
-        f"Upstream ANGLE: [`{manifest['upstreamCommit'][:7]}`]({manifest['sourceUrl'].rstrip('/')})",
+        f"Upstream ANGLE: [`{manifest['upstreamCommit'][:7]}`]({upstream_url})",
     ]
     if manifest.get("chromeVersion"):
         body.extend(
