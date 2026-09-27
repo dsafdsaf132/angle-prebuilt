@@ -249,15 +249,13 @@ def make_release_notes(manifest, artifact_root):
         f"Release: {manifest['releaseTitle']}",
         f"Tag: `{manifest['releaseTag']}`",
         "",
-        f"Channel: {manifest['channel']}",
-        f"Upstream ANGLE: `{manifest['upstreamCommit'][:7]}`",
-        f"Source: [ANGLE source `{manifest['upstreamCommit'][:7]}`]({manifest['sourceUrl']})",
+        f"Upstream ANGLE: [`{manifest['upstreamCommit'][:7]}`]({manifest['sourceUrl'].rstrip('/')})",
     ]
     if manifest.get("chromeVersion"):
         body.extend(
             [
                 f"Chrome version: `{manifest['chromeVersion']}`",
-                f"Chromium commit: `{manifest['chromiumCommit'][:7]}`",
+                f"Chromium commit: [`{manifest['chromiumCommit'][:7]}`](https://github.com/chromium/chromium/commit/{manifest['chromiumCommit']})",
             ]
         )
     body.extend(["", "Assets:", *(f"- `{name}`" for name in names), ""])
