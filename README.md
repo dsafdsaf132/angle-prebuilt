@@ -3,21 +3,23 @@
 This repository tracks upstream [google/ANGLE](https://github.com/google/angle) and publishes ready-to-use archives for
 native EGL/OpenGL ES consumers.
 
-It publishes two channels: Chrome Stable is checked daily at 23:00 UTC and rebuilt only when its pinned ANGLE commit has not been released; Dev builds run weekly on the existing Saturday 23:00 UTC sync schedule.
+Stable builds follow Chrome Stable and run daily. Dev builds follow upstream and run weekly after the Sunday 00:00 UTC sync.
 
-Stable release names include the Chrome version and the 7-character upstream ANGLE SHA, for example `angle-stable-chrome-123.0.0.0-a1b2c3d`. Dev releases include the UTC date and the same 7-character upstream SHA, for example `angle-dev-2026-09-27-a1b2c3d`. Each release records the full upstream SHA in `angle-build.json` and its release notes.
+Each archive records the full upstream SHA in `angle-build.json`.
+
+Archive filenames use the first 7 characters of the upstream SHA.
 
 ## Targets
 
 | Target | Archive | CI |
 | --- | --- | --- |
-| Linux x64 | `angle-{version}-linux-x64.tar.gz` | [![Smoke passed][smoke-passed]][ci-workflow] |
-| Linux arm64 | `angle-{version}-linux-arm64.tar.gz` | [![Smoke passed][smoke-passed]][ci-workflow] |
-| macOS x64 | `angle-{version}-darwin-x64.tar.gz` | [![Smoke skipped][smoke-skipped]][ci-workflow] |
-| macOS arm64 | `angle-{version}-darwin-arm64.tar.gz` | [![Smoke passed][smoke-passed]][ci-workflow] |
-| macOS universal | `angle-{version}-darwin-universal.tar.gz` | [![Smoke skipped][smoke-skipped]][ci-workflow] |
-| Windows x64 | `angle-{version}-win32-x64.zip` | [![Smoke passed][smoke-passed]][ci-workflow] |
-| Windows arm64 | `angle-{version}-win32-arm64.zip` | [![Smoke passed][smoke-passed]][ci-workflow] |
+| Linux x64 | `angle-{sha}-linux-x64.tar.gz` | [![Smoke passed][smoke-passed]][ci-workflow] |
+| Linux arm64 | `angle-{sha}-linux-arm64.tar.gz` | [![Smoke passed][smoke-passed]][ci-workflow] |
+| macOS x64 | `angle-{sha}-darwin-x64.tar.gz` | [![Smoke skipped][smoke-skipped]][ci-workflow] |
+| macOS arm64 | `angle-{sha}-darwin-arm64.tar.gz` | [![Smoke passed][smoke-passed]][ci-workflow] |
+| macOS universal | `angle-{sha}-darwin-universal.tar.gz` | [![Smoke skipped][smoke-skipped]][ci-workflow] |
+| Windows x64 | `angle-{sha}-win32-x64.zip` | [![Smoke passed][smoke-passed]][ci-workflow] |
+| Windows arm64 | `angle-{sha}-win32-arm64.zip` | [![Smoke passed][smoke-passed]][ci-workflow] |
 
 [ci-workflow]: https://github.com/dsafdsaf132/angle-prebuilt/actions/workflows/build.yml
 [smoke-passed]: https://img.shields.io/badge/Smoke-passed-brightgreen

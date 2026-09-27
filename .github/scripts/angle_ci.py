@@ -968,7 +968,7 @@ def create_package(args):
     artifact_dir.mkdir(parents=True, exist_ok=True)
     gn_args = load_json(args.gn_args_json)
     version = (
-        load_json(args.release_manifest)["releaseTag"]
+        load_json(args.release_manifest)["upstreamCommit"][:7]
         if args.release_manifest
         else parse_angle_version(source_root, args.angle_ref)
     )
@@ -1363,7 +1363,11 @@ def create_universal(args):
             json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
 
-        version = metadata.get("releaseTag") or archive_version_from_name(args.x64_archive)
+        version = (
+            metadata["upstreamCommit"][:7]
+            if metadata.get("upstreamCommit")
+            else archive_version_from_name(args.x64_archive)
+        )
         archive_path = artifact_dir / archive_name(version, "darwin", "universal")
         create_tar_gz(stage_root, archive_path)
 
@@ -1457,9 +1461,10 @@ def validate_release_assets(args):
         raise RuntimeError(f"Release archives contain multiple versions: {sorted(versions)}")
     if release_manifest_path:
         release_manifest = load_json(release_manifest_path)
-        if versions != {release_manifest.get("releaseTag")}:
+        expected_archive_version = release_manifest.get("upstreamCommit", "")[:7]
+        if versions != {expected_archive_version}:
             raise RuntimeError(
-                f"Release archive names do not match manifest tag {release_manifest.get('releaseTag')}"
+                f"Release archive names do not match upstream SHA {expected_archive_version}"
             )
     if len(commits) != 1:
         raise RuntimeError(f"Release archives contain multiple ANGLE commits: {sorted(commits)}")

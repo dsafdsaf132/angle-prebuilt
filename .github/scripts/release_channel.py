@@ -177,7 +177,8 @@ def make_release_notes(manifest, artifact_root):
 
     names = sorted(path.name for path in Path(artifact_root).iterdir() if path.is_file())
     body = [
-        f"{manifest['releaseTitle']}",
+        f"Release: {manifest['releaseTitle']}",
+        f"Tag: `{manifest['releaseTag']}`",
         "",
         f"Channel: {manifest['channel']}",
         f"Upstream ANGLE: `{manifest['upstreamCommit']}`",
@@ -187,7 +188,7 @@ def make_release_notes(manifest, artifact_root):
     if manifest.get("chromeVersion"):
         body.extend(
             [
-                f"Chrome Stable: `{manifest['chromeVersion']}`",
+                f"Chrome version: `{manifest['chromeVersion']}`",
                 f"Chromium commit: `{manifest['chromiumCommit']}`",
             ]
         )
