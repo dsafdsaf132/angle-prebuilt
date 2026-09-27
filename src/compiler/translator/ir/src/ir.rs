@@ -658,9 +658,9 @@ pub enum OpCode {
     // is true, that block jumps to the body of loop or the merge block otherwise.  For and
     // while loops can be distinguished by the presence of a "continue" block in Block.  The
     // body of the loop itself must terminate with `Continue` (if not otherwise terminated
-    // with `Break`, `Return` etc).  The continue block itself, if any, should also terminate
-    // with `Continue`, though that's immaterial (as there cannot be any other terminator).
-    //   Loop
+    // with `Break`, `Return`, `Discard`, etc).  The continue block itself, if any, should also
+    // terminate with `Continue`, though that's immaterial (as there cannot be any other
+    // terminator).   Loop
     Loop,
     // Similarly to `Loop`, marks the beginning of a do-loop.  Unlike `Loop`, the initial jump is
     // to the body of the do-while loop.  The body and condition blocks are similar to `Loop`.
@@ -2460,6 +2460,19 @@ impl AdvancedBlendEquations {
     }
 }
 
+#[cfg_attr(debug_assertions, derive(Debug))]
+pub struct FieldsUsedWithTexelFetch {
+    // If subfields is empty, this variable/field is itself a sampler that is statically used with
+    // `texelFetch`.  Otherwise, the subfields are used with `texelFetch`.
+    pub subfields: HashMap<u32, FieldsUsedWithTexelFetch>,
+}
+
+impl FieldsUsedWithTexelFetch {
+    fn new() -> FieldsUsedWithTexelFetch {
+        FieldsUsedWithTexelFetch { subfields: HashMap::new() }
+    }
+}
+
 // The entire IR.  At a high level, the IR is:
 //
 // - A set of types
@@ -2548,6 +2561,7 @@ pub struct IRMeta {
     // Shader reflection info
     reflection_info: reflection::Info,
     uses_secondary_frag_data: bool,
+    samplers_used_with_texel_fetch: HashMap<VariableId, FieldsUsedWithTexelFetch>,
 }
 
 impl IRMeta {
@@ -2694,6 +2708,7 @@ impl IRMeta {
             variables_pending_zero_initialization: HashSet::new(),
             reflection_info: reflection::Info::new(),
             uses_secondary_frag_data: false,
+            samplers_used_with_texel_fetch: HashMap::new(),
         }
     }
 
@@ -3339,17 +3354,18 @@ impl IRMeta {
     // variable is replaced with the global variable and a new id is assigned to the interface
     // variable and returned.  This way, the shader does not need to be modified except for
     // possibly writing to the cache variable at the start of shader and reading from it at the
-    // end.
+    // end.  If requested, the original variable's type is overridden with a given type.
     pub fn declare_cached_global_for_variable(
         &mut self,
         variable_id: VariableId,
         cache_name: &'static str,
+        original_variable_type_override: Option<TypeId>,
     ) -> (VariableId, TypedId) {
         let variable = self.get_variable_mut(variable_id);
 
         // Replace the variable with a private global.
         let original_name = std::mem::replace(&mut variable.name, Name::new_temp(cache_name));
-        let type_id = variable.type_id;
+        let type_id = original_variable_type_override.unwrap_or(variable.type_id);
         let precision = variable.precision;
         let precise = variable.precise;
         let original_decorations =
@@ -3541,6 +3557,16 @@ impl IRMeta {
         self.uses_secondary_frag_data
     }
 
+    pub fn mark_texel_fetch_use(&mut self, variable_id: VariableId, fields: &[u32]) {
+        let mut subfields = self
+            .samplers_used_with_texel_fetch
+            .entry(variable_id)
+            .or_insert(FieldsUsedWithTexelFetch::new());
+        for &field in fields {
+            subfields = subfields.subfields.entry(field).or_insert(FieldsUsedWithTexelFetch::new());
+        }
+    }
+
     pub fn take_reflection_info(&mut self) -> reflection::Info {
         std::mem::replace(&mut self.reflection_info, reflection::Info::new())
     }
@@ -3601,8 +3627,12 @@ impl IR {
         options: &reflection::Options,
         active_interface_variables: &HashSet<VariableId>,
     ) {
-        self.meta.reflection_info =
-            reflection::collect_info(self, options, active_interface_variables);
+        self.meta.reflection_info = reflection::collect_info(
+            self,
+            options,
+            active_interface_variables,
+            &self.meta.samplers_used_with_texel_fetch,
+        );
     }
 }
 

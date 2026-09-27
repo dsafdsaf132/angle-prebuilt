@@ -1189,7 +1189,7 @@ bool ValidateDisplay(const ValidationContext *val, const ThreadSafeDisplay *disp
         return false;
     }
 
-    if (!display->isInitialized())
+    if (!display->isInitializedAndNotTerminating())
     {
         if (val)
         {
@@ -1492,6 +1492,13 @@ bool ValidateSurfaceBadAccess(const ValidationContext *val,
         val->setError(EGL_BAD_ACCESS, "Surface can only be current on one thread");
         return false;
     }
+
+    if (surface->isLocked())
+    {
+        val->setError(EGL_BAD_ACCESS, "<surface> is locked");
+        return false;
+    }
+
     return true;
 }
 
@@ -2856,24 +2863,24 @@ ScopedThreadSafeDisplayRef GetThreadSafeDisplayIfValid(ThreadSafeDisplay *displa
     return ScopedThreadSafeDisplayRef(*display);
 }
 
-ScopedConstDisplayRefAndLock GetDisplayAndLockIfValid(const Display *display)
+ScopedConstDisplayLockAndRef GetDisplayAndLockIfValid(const Display *display)
 {
     if (!ValidateDisplayPointer(nullptr, display))
     {
-        return ScopedConstDisplayRefAndLock();
+        return ScopedConstDisplayLockAndRef();
     }
 
-    return ScopedConstDisplayRefAndLock(*display);
+    return ScopedConstDisplayLockAndRef(*display);
 }
 
-ScopedDisplayRefAndLock GetDisplayAndLockIfValid(Display *display)
+ScopedDisplayLockAndRef GetDisplayAndLockIfValid(Display *display)
 {
     if (!ValidateDisplayPointer(nullptr, display))
     {
-        return ScopedDisplayRefAndLock();
+        return ScopedDisplayLockAndRef();
     }
 
-    return ScopedDisplayRefAndLock(*display);
+    return ScopedDisplayLockAndRef(*display);
 }
 
 const Surface *GetSurfaceIfValid(const Display *display, SurfaceID surfaceID)
@@ -3694,7 +3701,7 @@ bool ValidateMakeCurrent(const ValidationContext *val,
     }
 
     // EGL 1.5 spec: dpy can be uninitialized if all other parameters are null
-    if (!display->isInitialized() && (!noContext || !noDraw || !noRead))
+    if (!display->isInitializedAndNotTerminating() && (!noContext || !noDraw || !noRead))
     {
         val->setError(EGL_NOT_INITIALIZED, "<display> not initialized");
         return false;
@@ -3708,7 +3715,7 @@ bool ValidateMakeCurrent(const ValidationContext *val,
     // Allow "un-make" the lost context:
     // If the context is lost, but EGLContext passed to eglMakeCurrent is EGL_NO_CONTEXT, we should
     // not return EGL_CONTEXT_LOST error code.
-    if (display->isInitialized() && display->isDeviceLost() && !noContext)
+    if (display->isInitializedAndNotTerminating() && display->isDeviceLost() && !noContext)
     {
         val->setError(EGL_CONTEXT_LOST, "Context was lost");
         return false;

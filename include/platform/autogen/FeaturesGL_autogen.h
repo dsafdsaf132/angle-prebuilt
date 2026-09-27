@@ -290,6 +290,12 @@ struct FeaturesGL : FeatureSetBase
         &members,
     };
 
+    FeatureInfo roundUp3dTextureSizeToPOTForLimit = {
+        "roundUp3dTextureSizeToPOTForLimit",
+        FeatureCategory::OpenGLWorkarounds,
+        &members,
+    };
+
     FeatureInfo adjustSrcDstRegionForBlitFramebuffer = {
         "adjustSrcDstRegionForBlitFramebuffer",
         FeatureCategory::OpenGLWorkarounds,
@@ -706,12 +712,6 @@ struct FeaturesGL : FeatureSetBase
 
     FeatureInfo validateMaxPerStageUniformBlocksAtCompileTime = {
         "validateMaxPerStageUniformBlocksAtCompileTime",
-        FeatureCategory::OpenGLWorkarounds,
-        &members,
-    };
-
-    FeatureInfo expandFragmentOutputsToVec4 = {
-        "expandFragmentOutputsToVec4",
         FeatureCategory::OpenGLWorkarounds,
         &members,
     };

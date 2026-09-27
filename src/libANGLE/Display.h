@@ -53,6 +53,7 @@ class SemaphoreManager;
 
 namespace rx
 {
+class ThreadSafeDisplayImpl;
 class DisplayImpl;
 class EGLImplFactory;
 }  // namespace rx
@@ -83,8 +84,6 @@ template <typename DisplayT>
 class ScopedDisplayLockAndRefT;
 using ScopedDisplayLockAndRef      = ScopedDisplayLockAndRefT<Display>;
 using ScopedConstDisplayLockAndRef = ScopedDisplayLockAndRefT<const Display>;
-using ScopedDisplayRefAndLock      = ScopedDisplayLockAndRef;
-using ScopedConstDisplayRefAndLock = ScopedConstDisplayLockAndRef;
 
 using SurfaceMap = priv::ObjectMap<Surface, angle::SimpleMutex>;
 using ThreadSet  = angle::HashSet<Thread *>;
@@ -165,7 +164,7 @@ class SyncSet final : angle::NonCopyable
     SyncSet();
     ~SyncSet();
 
-    Error createSync(const Display *display,
+    Error createSync(const ThreadSafeDisplay *display,
                      const gl::Context *currentContext,
                      EGLenum type,
                      const AttributeMap &attribs,
@@ -203,19 +202,26 @@ class ThreadSafeDisplay : public LabeledObject, public angle::NonCopyable
 {
   public:
     ThreadSafeDisplay(EGLNativeDisplayType displayId)
-        : mState(displayId), mInitialized(false), mRefCount(0)
+        : mState(displayId), mThreadSafeImpl(nullptr), mRefCount(0)
     {}
     ~ThreadSafeDisplay() override = default;
 
-    bool isInitialized() const;
+    // Returns whether the display is initialized and is not concurrently being terminated.  This
+    // is what callers outside the display want: a display that is being terminated must already be
+    // treated as no longer initialized.
+    bool isInitializedAndNotTerminating() const;
     bool isDeviceLost() const;
 
     const DisplayExtensions &getExtensions() const { return mDisplayExtensions; }
 
-    virtual Error createSync(const gl::Context *currentContext,
-                             EGLenum type,
-                             const AttributeMap &attribs,
-                             Sync **outSync) = 0;
+    // Note that Display::getImplementation() hides this one and returns the rx::DisplayImpl
+    // instead, so the impl that is retrieved depends on the static type of the display.
+    rx::ThreadSafeDisplayImpl *getImplementation() const { return mThreadSafeImpl; }
+
+    Error createSync(const gl::Context *currentContext,
+                     EGLenum type,
+                     const AttributeMap &attribs,
+                     Sync **outSync);
     void destroySync(Sync *sync);
     void releaseSync(Sync *sync);
 
@@ -246,13 +252,27 @@ class ThreadSafeDisplay : public LabeledObject, public angle::NonCopyable
     }
     bool isTerminating() const;
 
+    // Returns whether the display has been initialized, disregarding whether it is currently being
+    // terminated.  This remains stable for as long as a display reference is held, since
+    // terminate() only clears the bit after waitUntilUnreferenced().  Callers that must also
+    // account for a concurrent terminate() want isInitializedAndNotTerminating() instead.
+    bool isInitialized() const;
+    // Both of these must be called with mDisplayMutex held.
+    void setInitialized();
+    void setUninitialized();
+
+    Error restoreLostDevice() const;
+
+    // The high bits of mRefCount hold flags; the remaining bits hold the reference count itself.
+    // Keeping the initialized flag in the same word as the terminating flag lets
+    // isInitializedAndNotTerminating() observe the two as a consistent pair with a single load.
     static constexpr uint32_t kTerminatingBit = 1u << 31;
-    static constexpr uint32_t kRefCountMask   = ~kTerminatingBit;
+    static constexpr uint32_t kInitializedBit = 1u << 30;
+    static constexpr uint32_t kRefCountMask   = ~(kTerminatingBit | kInitializedBit);
 
     DisplayState mState;
 
-    // This gets accessed from multiple threads without locks.
-    std::atomic<bool> mInitialized;
+    rx::ThreadSafeDisplayImpl *mThreadSafeImpl;
 
     DisplayExtensions mDisplayExtensions;
 
@@ -336,11 +356,6 @@ class Display final : public angle::ObserverInterface, public ThreadSafeDisplay
                         gl::Context *shareContext,
                         const AttributeMap &attribs,
                         gl::Context **outContext);
-
-    Error createSync(const gl::Context *currentContext,
-                     EGLenum type,
-                     const AttributeMap &attribs,
-                     Sync **outSync) override;
 
     Error makeCurrent(Thread *thread,
                       gl::Context *previousContext,
@@ -503,7 +518,6 @@ class Display final : public angle::ObserverInterface, public ThreadSafeDisplay
     void setAttributes(const AttributeMap &attribMap) { mAttributeMap = attribMap; }
     void setupDisplayPlatform(rx::DisplayImpl *impl);
 
-    Error restoreLostDevice() const;
     Error releaseContext(gl::Context *context, Thread *thread);
     Error releaseContextImpl(std::unique_ptr<gl::Context> &&context);
     std::unique_ptr<gl::Context> eraseContextImpl(gl::Context *context, ContextMap *contexts);

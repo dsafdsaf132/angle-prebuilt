@@ -69,7 +69,7 @@ class ImageMemorySuballocator : angle::NonCopyable
     ImageMemorySuballocator();
     ~ImageMemorySuballocator();
 
-    void destroy(vk::Renderer *renderer);
+    void destroy(Renderer *renderer);
 
     // Allocates memory for the image and binds it.
     VkResult allocateAndBindMemory(ErrorContext *context,
@@ -86,7 +86,7 @@ class ImageMemorySuballocator : angle::NonCopyable
                                    VkDeviceSize *sizeOut);
 
     // Maps the memory to initialize with non-zero value.
-    VkResult mapMemoryAndInitWithNonZeroValue(vk::Renderer *renderer,
+    VkResult mapMemoryAndInitWithNonZeroValue(Renderer *renderer,
                                               Allocation *allocation,
                                               VkDeviceSize size,
                                               int value,
@@ -94,6 +94,12 @@ class ImageMemorySuballocator : angle::NonCopyable
 
     // Determines if dedicated memory is required for the allocation.
     bool needsDedicatedMemory(VkDeviceSize size) const;
+
+    // Initializes a custom memory pool with a specific type index (if needed) and returns it.
+    VkResult getMemoryPool(Renderer *renderer, uint32_t poolMemoryTypeIndex, Pool **poolOut);
+
+  private:
+    std::array<Pool, VK_MAX_MEMORY_TYPES> mMemoryPools;
 };
 
 // Supports one semaphore from current surface, and one semaphore passed to
@@ -215,6 +221,7 @@ class Renderer : angle::NonCopyable
 
     const vk::Allocator &getAllocator() const { return mAllocator; }
     vk::ImageMemorySuballocator &getImageMemorySuballocator() { return mImageMemorySuballocator; }
+    VkDeviceSize getPreferredLargeHeapBlockSize() const { return mPreferredLargeHeapBlockSize; }
 
     angle::Result checkQueueForSurfacePresent(vk::ErrorContext *context,
                                               VkSurfaceKHR surface,
@@ -859,6 +866,7 @@ class Renderer : angle::NonCopyable
     VkPhysicalDeviceProvokingVertexFeaturesEXT mProvokingVertexFeatures;
     VkPhysicalDeviceVertexAttributeDivisorFeatures mVertexAttributeDivisorFeatures;
     VkPhysicalDeviceVertexAttributeDivisorProperties mVertexAttributeDivisorProperties;
+    VkPhysicalDeviceVertexAttributeDivisorPropertiesEXT mVertexAttributeDivisorPropertiesEXT;
     VkPhysicalDeviceTransformFeedbackFeaturesEXT mTransformFeedbackFeatures;
     VkPhysicalDeviceIndexTypeUint8Features mIndexTypeUint8Features;
     VkPhysicalDeviceSubgroupProperties mSubgroupProperties;
@@ -953,7 +961,11 @@ class Renderer : angle::NonCopyable
     VkDevice mDevice;
     VkDeviceSize mMaxCopyBytesUsingCPUWhenPreservingBufferData;
 
-    bool mDeviceLost;
+    // Written by the thread that detects the loss and read by any thread calling
+    // ThreadSafeDisplayImpl::testDeviceLost(), which runs without the display lock.  Relaxed
+    // ordering is sufficient: the flag only ever goes false -> true for the lifetime of the
+    // Renderer, so a stale read is always a stale false and the loss is observed on a later call.
+    std::atomic<bool> mDeviceLost;
 
     vk::SharedGarbageList<vk::SharedGarbage> mSharedGarbageList;
     // Suballocations have its own dedicated garbage list for performance optimization since they

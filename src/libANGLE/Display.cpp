@@ -914,6 +914,29 @@ void UpdateAttribsFromEnvironment(AttributeMap &attribMap)
 
 static constexpr uint32_t kScratchBufferLifetime = 64u;
 
+class [[nodiscard]] ScopedResetThreadContextOnError : angle::NonCopyable
+{
+  public:
+    ScopedResetThreadContextOnError(Thread *thread, bool resetOnError)
+        : mThread(thread), mResetOnError(resetOnError)
+    {}
+
+    ~ScopedResetThreadContextOnError()
+    {
+        if (mResetOnError)
+        {
+            mThread->setCurrent(nullptr);
+        }
+    }
+
+    // No error, so reset won't happen
+    void success() { mResetOnError = false; }
+
+  private:
+    Thread *mThread;
+    bool mResetOnError;
+};
+
 }  // anonymous namespace
 
 SyncSet::SyncSet() : mHandleAllocator(gl::IMPLEMENTATION_MAX_OBJECT_HANDLES) {}
@@ -923,7 +946,7 @@ SyncSet::~SyncSet()
     clearPools();
 }
 
-Error SyncSet::createSync(const Display *display,
+Error SyncSet::createSync(const ThreadSafeDisplay *display,
                           const gl::Context *currentContext,
                           EGLenum type,
                           const AttributeMap &attribs,
@@ -1073,7 +1096,7 @@ void DisplayState::notifyDeviceLost() const
 // ThreadSafeDisplay implementation:
 bool ThreadSafeDisplay::isInitialized() const
 {
-    return mInitialized.load(std::memory_order_acquire) && !isTerminating();
+    return (mRefCount.load(std::memory_order_acquire) & kInitializedBit) != 0;
 }
 
 bool ThreadSafeDisplay::isTerminating() const
@@ -1081,13 +1104,31 @@ bool ThreadSafeDisplay::isTerminating() const
     return (mRefCount.load(std::memory_order_acquire) & kTerminatingBit) != 0;
 }
 
+bool ThreadSafeDisplay::isInitializedAndNotTerminating() const
+{
+    // A single load ensures the initialized and terminating bits are observed as a consistent
+    // pair.  With two separate atomics, a reader could load an already-stale initialized flag and
+    // then observe the terminating bit after terminate() cleared it, reporting a state that never
+    // existed.
+    constexpr uint32_t kMask = kInitializedBit | kTerminatingBit;
+    return (mRefCount.load(std::memory_order_acquire) & kMask) == kInitializedBit;
+}
+
+void ThreadSafeDisplay::setInitialized()
+{
+    // Read-modify-write rather than a plain store: the reference count bits in the same word may
+    // be concurrently modified by other threads.
+    mRefCount.fetch_or(kInitializedBit, std::memory_order_release);
+}
+
+void ThreadSafeDisplay::setUninitialized()
+{
+    mRefCount.fetch_and(~kInitializedBit, std::memory_order_release);
+}
+
 bool ThreadSafeDisplay::isDeviceLost() const
 {
-    // Deliberately checks the member rather than isInitialized(), which also folds in
-    // isTerminating(): another thread can set the terminating bit at any point while this
-    // thread holds a display reference.  mInitialized itself is stable for ref holders, since
-    // terminate() only clears it after waitUntilUnreferenced().
-    ASSERT(mInitialized.load(std::memory_order_relaxed));
+    ASSERT(isInitialized());
     return mState.deviceLost.load(std::memory_order_relaxed);
 }
 
@@ -1115,6 +1156,33 @@ void ThreadSafeDisplay::destroySync(Sync *sync)
         return;
     }
     mSyncSet.destroySync(this, sync->id());
+}
+
+Error ThreadSafeDisplay::createSync(const gl::Context *currentContext,
+                                    EGLenum type,
+                                    const AttributeMap &attribs,
+                                    Sync **outSync)
+{
+    ASSERT(isInitialized());
+
+    if (mThreadSafeImpl->testDeviceLost())
+    {
+        ANGLE_TRY(restoreLostDevice());
+    }
+
+    return mSyncSet.createSync(this, currentContext, type, attribs, outSync);
+}
+
+Error ThreadSafeDisplay::restoreLostDevice() const
+{
+    // If reset notifications have been requested, application must delete all contexts first
+    const bool noResetNotificationRequested = mState.contextMap.forEach(
+        [](gl::Context *context) { return !context->isResetNotificationEnabled(); });
+    if (!noResetNotificationRequested)
+    {
+        return egl::Error(EGL_CONTEXT_LOST);
+    }
+    return mThreadSafeImpl->restoreLostDevice(this);
 }
 
 // Note that ANGLE support on Ozone platform is limited. Our preferred support Matrix for
@@ -1316,12 +1384,14 @@ void Display::onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMess
 
 void Display::setupDisplayPlatform(rx::DisplayImpl *impl)
 {
-    ASSERT(!mInitialized);
+    ASSERT(!isInitialized());
     ASSERT(impl != nullptr);
     mDisplayMutex.assertLocked();
 
     SafeDelete(mImplementation);
     mImplementation = impl;
+
+    mThreadSafeImpl = impl->getThreadSafeDisplayImpl();
 
     // TODO(anglebug.com/42265835): Remove PlatformMethods.
     const angle::PlatformMethods *platformMethods =
@@ -1510,7 +1580,7 @@ Error Display::initialize()
         mManagersMutex->addRef();
     }
 
-    mInitialized = true;
+    setInitialized();
 
     return NoError();
 }
@@ -1574,7 +1644,7 @@ Error Display::terminate(Thread *thread, TerminateReason terminateReason)
 
     // All subsequent calls assume the display to be valid and terminated by app.
     // If it is not terminated, if it isn't initialized, early return.
-    if (!mTerminatedByApi || !mInitialized)
+    if (!mTerminatedByApi || !isInitialized())
     {
         return NoError();
     }
@@ -1667,7 +1737,7 @@ Error Display::terminate(Thread *thread, TerminateReason terminateReason)
 
     mState.deviceLost = false;
 
-    mInitialized = false;
+    setUninitialized();
 
     gl::UninitializeDebugAnnotations();
 
@@ -1725,7 +1795,7 @@ Error Display::createWindowSurface(const Config *configuration,
                                    const AttributeMap &attribs,
                                    Surface **outSurface)
 {
-    if (mImplementation->testDeviceLost())
+    if (mThreadSafeImpl->testDeviceLost())
     {
         ANGLE_TRY(restoreLostDevice());
     }
@@ -1760,7 +1830,7 @@ Error Display::createPbufferSurface(const Config *configuration,
 {
     ASSERT(isInitialized());
 
-    if (mImplementation->testDeviceLost())
+    if (mThreadSafeImpl->testDeviceLost())
     {
         ANGLE_TRY(restoreLostDevice());
     }
@@ -1791,7 +1861,7 @@ Error Display::createPbufferFromClientBuffer(const Config *configuration,
 {
     ASSERT(isInitialized());
 
-    if (mImplementation->testDeviceLost())
+    if (mThreadSafeImpl->testDeviceLost())
     {
         ANGLE_TRY(restoreLostDevice());
     }
@@ -1822,7 +1892,7 @@ Error Display::createPixmapSurface(const Config *configuration,
 {
     ASSERT(isInitialized());
 
-    if (mImplementation->testDeviceLost())
+    if (mThreadSafeImpl->testDeviceLost())
     {
         ANGLE_TRY(restoreLostDevice());
     }
@@ -1854,7 +1924,7 @@ Error Display::createImage(const gl::Context *context,
 {
     ASSERT(isInitialized());
 
-    if (mImplementation->testDeviceLost())
+    if (mThreadSafeImpl->testDeviceLost())
     {
         ANGLE_TRY(restoreLostDevice());
     }
@@ -1926,7 +1996,7 @@ Error Display::createContext(const Config *configuration,
     ASSERT(!mTerminatedByApi);
     ASSERT(isInitialized());
 
-    if (mImplementation->testDeviceLost())
+    if (mThreadSafeImpl->testDeviceLost())
     {
         ANGLE_TRY(restoreLostDevice());
     }
@@ -2031,28 +2101,13 @@ Error Display::createContext(const Config *configuration,
     return NoError();
 }
 
-Error Display::createSync(const gl::Context *currentContext,
-                          EGLenum type,
-                          const AttributeMap &attribs,
-                          Sync **outSync)
-{
-    ASSERT(isInitialized());
-
-    if (mImplementation->testDeviceLost())
-    {
-        ANGLE_TRY(restoreLostDevice());
-    }
-
-    return mSyncSet.createSync(this, currentContext, type, attribs, outSync);
-}
-
 Error Display::makeCurrent(Thread *thread,
                            gl::Context *previousContext,
                            egl::Surface *drawSurface,
                            egl::Surface *readSurface,
                            gl::Context *context)
 {
-    if (!mInitialized)
+    if (!isInitialized())
     {
         return NoError();
     }
@@ -2080,6 +2135,7 @@ Error Display::makeCurrent(Thread *thread,
         ScopedContextMutexLock lock(context != nullptr ? &context->getContextMutex() : nullptr);
 
         thread->setCurrent(context);
+        ScopedResetThreadContextOnError resetOnError(thread, contextChanged);
 
         ANGLE_TRY(mImplementation->makeCurrent(this, drawSurface, readSurface, context));
 
@@ -2091,6 +2147,8 @@ Error Display::makeCurrent(Thread *thread,
                 context->addRef();
             }
         }
+
+        resetOnError.success();
     }
 
     // Tick all the scratch buffers to make sure they get cleaned up eventually if they stop being
@@ -2117,18 +2175,6 @@ Error Display::makeCurrent(Thread *thread,
     }
 
     return NoError();
-}
-
-Error Display::restoreLostDevice() const
-{
-    // If reset notifications have been requested, application must delete all contexts first
-    const bool noResetNotificationRequested = mState.contextMap.forEach(
-        [](gl::Context *context) { return !context->isResetNotificationEnabled(); });
-    if (!noResetNotificationRequested)
-    {
-        return egl::Error(EGL_CONTEXT_LOST);
-    }
-    return mImplementation->restoreLostDevice(this);
 }
 
 Error Display::destroySurfaceImpl(Surface *surface, SurfaceMap *surfaces)
@@ -2301,7 +2347,7 @@ bool Display::testDeviceLost()
 {
     ASSERT(isInitialized());
 
-    if (!mState.deviceLost && mImplementation->testDeviceLost())
+    if (!mState.deviceLost && mThreadSafeImpl->testDeviceLost())
     {
         notifyDeviceLost();
     }

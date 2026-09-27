@@ -2170,6 +2170,11 @@ void GenerateCaps(const FunctionsGL *functions,
     {
         limitations->maxBufferBytes = 1 << 30;
     }
+
+    if (features.roundUp3dTextureSizeToPOTForLimit.enabled)
+    {
+        limitations->roundUp3DTextureSizeToPOTForLimit = true;
+    }
 }
 
 bool GetSystemInfoVendorIDAndDeviceID(const FunctionsGL *functions,
@@ -2384,6 +2389,8 @@ void InitializeFeatures(const FunctionsGL *functions, angle::FeaturesGL *feature
     ANGLE_FEATURE_CONDITION(features, disableMSAASampleCount1, isHuaweiMaleoon);
     ANGLE_FEATURE_CONDITION(features, limitMax3dArrayTextureSizeTo1024,
                             isIntelLinuxLessThanKernelVersion5);
+    ANGLE_FEATURE_CONDITION(features, roundUp3dTextureSizeToPOTForLimit,
+                            isPowerVRDriver && powerVRVersion < (std::array<int, 2>{26, 2}));
 
     ANGLE_FEATURE_CONDITION(features, allowClearForRobustResourceInit, IsApple());
 
@@ -2721,9 +2728,6 @@ void InitializeFeatures(const FunctionsGL *functions, angle::FeaturesGL *feature
     // driver, but in both cases ensuring that the full mip chain is explicitly defined prior to
     // mipmap generation avoids the problem.
     ANGLE_FEATURE_CONDITION(features, recreateMipmapLevelsBeforeGenerate, isMesa || isMali);
-
-    // http://crbug.com/498828605
-    ANGLE_FEATURE_CONDITION(features, expandFragmentOutputsToVec4, isAMD && isMesa);
 
     // https://github.com/flutter/flutter/issues/47164
     // https://github.com/flutter/flutter/issues/47804
