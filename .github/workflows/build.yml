@@ -98,10 +98,55 @@ jobs:
             commit_json="$(curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$encoded_ref")"
             build_ref="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])' <<< "$commit_json")"
             message="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"]["message"])' <<< "$commit_json")"
-            upstream_commit="$(sed -n 's/^Upstream-ANGLE-Commit: //p' <<< "$message" | head -1)"
-            if [[ ! "$upstream_commit" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "::error::Dev release source has no valid Upstream-ANGLE-Commit trailer"
-              exit 1
+            sync_subject="${message%%$'\n'*}"
+            recorded_upstream="$(python3 -c 'import re,sys; values=re.findall(r"^Upstream-ANGLE-Commit: ([0-9a-f]{40})$",sys.stdin.read(),re.M); print(values[0] if len(values)==1 else "")' <<< "$message")"
+            upstream_parent="$(python3 -c 'import json,sys; parents=json.load(sys.stdin).get("parents", []); print(parents[1]["sha"] if len(parents)>1 else "")' <<< "$commit_json")"
+            upstream_commit=""
+            if [[ "$sync_subject" == "chore(sync): merge upstream ANGLE "* ]] &&
+              git interpret-trailers --parse <<< "$message" | grep -Eq '^Upstream-ANGLE-Commit-Position:[[:space:]]*[0-9]+[[:space:]]*$' &&
+              [[ "$recorded_upstream" =~ ^[0-9a-f]{40}$ && "$recorded_upstream" == "$upstream_parent" ]]; then
+              upstream_commit="$upstream_parent"
+            fi
+            if [[ -z "$upstream_commit" ]]; then
+              if [[ -n "$INPUT_ANGLE_COMMIT" ]]; then
+                echo "::error::Dev release commit is not a valid upstream sync commit"
+                exit 1
+              fi
+              candidate="$build_ref"
+              upstream_commit=""
+              for _ in {1..50}; do
+                commit_json="$(
+                  curl -fsSL \
+                    --retry 5 \
+                    --retry-delay 5 \
+                    --retry-all-errors \
+                    --connect-timeout 20 \
+                    -H "Authorization: Bearer $GH_TOKEN" \
+                    -H "Accept: application/vnd.github+json" \
+                    "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$candidate"
+                )"
+                message="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"]["message"])' <<< "$commit_json")"
+                sync_subject="${message%%$'\n'*}"
+                recorded_upstream="$(python3 -c 'import re,sys; values=re.findall(r"^Upstream-ANGLE-Commit: ([0-9a-f]{40})$",sys.stdin.read(),re.M); print(values[0] if len(values)==1 else "")' <<< "$message")"
+                upstream_parent="$(python3 -c 'import json,sys; parents=json.load(sys.stdin).get("parents", []); print(parents[1]["sha"] if len(parents)>1 else "")' <<< "$commit_json")"
+                if [[ "$sync_subject" == "chore(sync): merge upstream ANGLE "* ]] &&
+                  git interpret-trailers --parse <<< "$message" | grep -Eq '^Upstream-ANGLE-Commit-Position:[[:space:]]*[0-9]+[[:space:]]*$'; then
+                  if [[ "$recorded_upstream" =~ ^[0-9a-f]{40}$ && "$recorded_upstream" == "$upstream_parent" ]]; then
+                    build_ref="$candidate"
+                    upstream_commit="$upstream_parent"
+                    echo "Latest upstream sync commit: $build_ref"
+                    break
+                  fi
+                fi
+                candidate="$(python3 -c 'import json,sys; parents=json.load(sys.stdin).get("parents", []); print(parents[0]["sha"] if parents else "")' <<< "$commit_json")"
+                if [[ -z "$candidate" ]]; then
+                  break
+                fi
+              done
+              if [[ ! "$upstream_commit" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "::error::Could not find a recent upstream sync commit on $requested_ref"
+                exit 1
+              fi
             fi
             manifest="$(python3 "$GITHUB_WORKSPACE/.github/scripts/release_channel.py" resolve-dev --angle-ref "$requested_ref" --angle-commit "$build_ref" --upstream-commit "$upstream_commit")"
           fi
@@ -143,12 +188,18 @@ jobs:
                 python3 -c 'import json, sys; print(json.load(sys.stdin)["commit"]["message"])' \
                   <<< "$commit_json"
               )"
-              if [[ "$message" =~ Upstream-ANGLE-Commit-Position:[[:space:]]*([0-9]+) ]]; then
-                build_ref="$candidate"
-                sync_position="${BASH_REMATCH[1]}"
-                upstream_commit="$(sed -n 's/^Upstream-ANGLE-Commit: //p' <<< "$message" | head -1)"
-                echo "Latest upstream sync commit: $build_ref"
-                break
+              sync_subject="${message%%$'\n'*}"
+              if [[ "$sync_subject" == "chore(sync): merge upstream ANGLE "* ]] &&
+                git interpret-trailers --parse <<< "$message" | grep -Eq '^Upstream-ANGLE-Commit-Position:[[:space:]]*[0-9]+[[:space:]]*$'; then
+                recorded_upstream="$(python3 -c 'import re,sys; values=re.findall(r"^Upstream-ANGLE-Commit: ([0-9a-f]{40})$",sys.stdin.read(),re.M); print(values[0] if len(values)==1 else "")' <<< "$message")"
+                upstream_parent="$(python3 -c 'import json,sys; parents=json.load(sys.stdin).get("parents", []); print(parents[1]["sha"] if len(parents)>1 else "")' <<< "$commit_json")"
+                if [[ "$recorded_upstream" =~ ^[0-9a-f]{40}$ && "$recorded_upstream" == "$upstream_parent" ]]; then
+                  build_ref="$candidate"
+                  sync_position="$(sed -n 's/^Upstream-ANGLE-Commit-Position:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*$/\1/p' <<< "$message" | head -1)"
+                  upstream_commit="$upstream_parent"
+                  echo "Latest upstream sync commit: $build_ref"
+                  break
+                fi
               fi
               candidate="$(
                 python3 -c 'import json, sys; parents=json.load(sys.stdin).get("parents", []); print(parents[0]["sha"] if parents else "")' \
