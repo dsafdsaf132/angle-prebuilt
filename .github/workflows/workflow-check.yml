@@ -26,6 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m py_compile .github/scripts/angle_ci.py
+          python3 -m py_compile .github/scripts/release_channel.py
           python3 .github/scripts/angle_ci.py self-test
           python3 -m py_compile .github/scripts/select_upstream_commit.py
           python3 .github/scripts/select_upstream_commit.py --self-test

@@ -3,6 +3,14 @@ name: Build
 on:
   workflow_dispatch:
     inputs:
+      channel:
+        description: Release channel to build.
+        required: true
+        type: choice
+        options:
+          - dev
+          - stable
+        default: dev
       angle_ref:
         description: Fork branch, tag, or ref to build.
         required: true
@@ -19,6 +27,8 @@ on:
         description: Optional workflow run ID whose angle-* artifacts should be reused for release.
         required: false
         default: ""
+  schedule:
+    - cron: "0 23 * * *"
   workflow_run:
     workflows:
       - Sync Fork
@@ -41,6 +51,7 @@ jobs:
     outputs:
       should_build: ${{ steps.decide.outputs.should_build }}
       build_ref: ${{ steps.decide.outputs.build_ref }}
+      manifest: ${{ steps.decide.outputs.manifest }}
     permissions:
       contents: read
     steps:
@@ -52,6 +63,8 @@ jobs:
           INPUT_ANGLE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.angle_ref || '' }}
           INPUT_ANGLE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.angle_commit || '' }}
           INPUT_ARTIFACT_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.artifact_run_id || '' }}
+          INPUT_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.channel || '' }}
+          EVENT_SCHEDULE: ${{ github.event.schedule || '' }}
           WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion || '' }}
           WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || 'main' }}
           GH_TOKEN: ${{ github.token }}
@@ -59,34 +72,38 @@ jobs:
           set -euo pipefail
           should_build=0
           build_ref=""
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            if [[ -n "$INPUT_ARTIFACT_RUN_ID" ]]; then
-              echo "Reusing artifacts from run $INPUT_ARTIFACT_RUN_ID; skipping source resolution"
+          channel="dev"
+          manifest='{}'
+          if [[ "$EVENT_NAME" == "schedule" ]]; then
+            channel="stable"
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            channel="${INPUT_CHANNEL:-dev}"
+          fi
+          if [[ "$channel" == "stable" ]]; then
+            manifest="$(python3 "$GITHUB_WORKSPACE/.github/scripts/release_channel.py" resolve-stable)"
+            upstream_commit="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["upstreamCommit"])' <<< "$manifest")"
+            build_ref="$upstream_commit"
+            if [[ "$(python3 "$GITHUB_WORKSPACE/.github/scripts/release_channel.py" has-stable-release --repository "$GITHUB_REPOSITORY" --upstream-commit "$upstream_commit")" == "true" ]]; then
+              echo "Stable ANGLE $upstream_commit is already released; skipping"
             else
               should_build=1
-              requested_ref="${INPUT_ANGLE_COMMIT:-$INPUT_ANGLE_REF}"
-              encoded_ref="$(
-                python3 -c \
-                  'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' \
-                  "$requested_ref"
-              )"
-              commit_json="$(
-                curl -fsSL \
-                  --retry 5 \
-                  --retry-delay 5 \
-                  --retry-all-errors \
-                  --connect-timeout 20 \
-                  -H "Authorization: Bearer $GH_TOKEN" \
-                  -H "Accept: application/vnd.github+json" \
-                  "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$encoded_ref"
-              )"
-              build_ref="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["sha"])' <<< "$commit_json")"
-              if [[ ! "$build_ref" =~ ^[0-9a-f]{40}$ ]]; then
-                echo "::error::Invalid resolved ANGLE commit for $requested_ref: $build_ref"
-                exit 1
-              fi
-              echo "Resolved ANGLE ref $requested_ref to $build_ref"
             fi
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" && -z "$INPUT_ARTIFACT_RUN_ID" ]]; then
+            should_build=1
+            requested_ref="${INPUT_ANGLE_COMMIT:-$INPUT_ANGLE_REF}"
+            encoded_ref="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1],safe=""))' "$requested_ref")"
+            commit_json="$(curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$encoded_ref")"
+            build_ref="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])' <<< "$commit_json")"
+            message="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"]["message"])' <<< "$commit_json")"
+            upstream_commit="$(sed -n 's/^Upstream-ANGLE-Commit: //p' <<< "$message" | head -1)"
+            if [[ ! "$upstream_commit" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::Dev release source has no valid Upstream-ANGLE-Commit trailer"
+              exit 1
+            fi
+            manifest="$(python3 "$GITHUB_WORKSPACE/.github/scripts/release_channel.py" resolve-dev --angle-ref "$requested_ref" --angle-commit "$build_ref" --upstream-commit "$upstream_commit")"
+          fi
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && -n "$INPUT_ARTIFACT_RUN_ID" ]]; then
+            echo "Reusing artifacts from run $INPUT_ARTIFACT_RUN_ID; skipping source resolution"
           elif [[ "$EVENT_NAME" == "workflow_run" && "$WORKFLOW_RUN_CONCLUSION" == "success" ]]; then
             target_branch="${WORKFLOW_RUN_HEAD_BRANCH:-main}"
             ref_json="$(
@@ -126,6 +143,7 @@ jobs:
               if [[ "$message" =~ Upstream-ANGLE-Commit-Position:[[:space:]]*([0-9]+) ]]; then
                 build_ref="$candidate"
                 sync_position="${BASH_REMATCH[1]}"
+                upstream_commit="$(sed -n 's/^Upstream-ANGLE-Commit: //p' <<< "$message" | head -1)"
                 echo "Latest upstream sync commit: $build_ref"
                 break
               fi
@@ -142,7 +160,12 @@ jobs:
               fi
             done
             if [[ -n "$sync_position" ]]; then
-              tag="angle-main-$sync_position"
+              if [[ ! "$upstream_commit" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "::error::Sync commit $build_ref has no valid Upstream-ANGLE-Commit trailer"
+                exit 1
+              fi
+              manifest="$(python3 "$GITHUB_WORKSPACE/.github/scripts/release_channel.py" resolve-dev --angle-ref main --angle-commit "$build_ref" --upstream-commit "$upstream_commit")"
+              tag="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["releaseTag"])' <<< "$manifest")"
               status="$(
                 curl -fsS -o /dev/null -w "%{http_code}" \
                   --retry 5 \
@@ -168,6 +191,8 @@ jobs:
           fi
           echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
           echo "build_ref=$build_ref" >> "$GITHUB_OUTPUT"
+          delimiter="ANGLE_MANIFEST_$(openssl rand -hex 8)"
+          printf 'manifest<<%s\n%s\n%s\n' "$delimiter" "$manifest" "$delimiter" >> "$GITHUB_OUTPUT"
 
   build:
     name: ${{ matrix.target }}
@@ -213,6 +238,7 @@ jobs:
       DEPOT_TOOLS_WIN_TOOLCHAIN: "0"
       GYP_MSVS_VERSION: "2022"
       LINUX_ARM64_LLVM_VERSION: "23"
+      ANGLE_RELEASE_MANIFEST: ${{ needs.preflight.outputs.manifest }}
 
     steps:
       - name: Check out workflow repository
@@ -220,7 +246,7 @@ jobs:
         with:
           fetch-depth: 0
           path: angle
-          ref: ${{ needs.preflight.outputs.build_ref }}
+          ref: ${{ github.sha }}
 
       - name: Check out CI helpers
         uses: actions/checkout@v7
@@ -283,15 +309,22 @@ jobs:
       - name: Resolve ANGLE source
         shell: bash
         working-directory: angle
+        env:
+          ANGLE_BUILD_REF: ${{ needs.preflight.outputs.build_ref }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            ref="${{ inputs.angle_ref }}"
-            requested_commit="${{ inputs.angle_commit }}"
-            if [[ -n "$requested_commit" ]]; then
-              git checkout --detach "$requested_commit"
-            fi
-            effective_ref="$ref"
+          manifest_file="$RUNNER_TEMP/release-manifest.json"
+          printf '%s' "$ANGLE_RELEASE_MANIFEST" > "$manifest_file"
+          channel="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["channel"])' <<< "$ANGLE_RELEASE_MANIFEST")"
+          if [[ "$channel" == "stable" ]]; then
+            angle_sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["angleCommit"])' <<< "$ANGLE_RELEASE_MANIFEST")"
+            git remote add angle-upstream https://chromium.googlesource.com/angle/angle.git 2>/dev/null || true
+            git fetch --no-tags angle-upstream "$angle_sha"
+            git checkout --detach FETCH_HEAD
+            effective_ref="upstream"
+          elif [[ "$ANGLE_BUILD_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            git checkout --detach "$ANGLE_BUILD_REF"
+            effective_ref="${{ inputs.angle_ref || 'main' }}"
           else
             effective_ref="main"
           fi
@@ -299,6 +332,7 @@ jobs:
           resolved_commit="$(git rev-parse HEAD)"
           echo "ANGLE_REF_EFFECTIVE=$effective_ref" >> "$GITHUB_ENV"
           echo "ANGLE_COMMIT_RESOLVED=$resolved_commit" >> "$GITHUB_ENV"
+          echo "ANGLE_RELEASE_MANIFEST=$manifest_file" >> "$GITHUB_ENV"
           echo "ANGLE ref: $effective_ref"
           echo "ANGLE commit: $resolved_commit"
 
@@ -529,7 +563,8 @@ jobs:
             --arch "${{ matrix.arch }}" \
             --angle-ref "$ANGLE_REF_EFFECTIVE" \
             --angle-commit "$ANGLE_COMMIT_RESOLVED" \
-            --gn-args-json "$RUNNER_TEMP/gn-args.json"
+            --gn-args-json "$RUNNER_TEMP/gn-args.json" \
+            --release-manifest "$ANGLE_RELEASE_MANIFEST"
           ls -la "$RUNNER_TEMP/artifacts"
 
       - name: Verify archive layout and dependencies
@@ -727,10 +762,18 @@ jobs:
       - name: Validate release assets
         id: assets
         shell: bash
+        env:
+          RELEASE_MANIFEST: ${{ needs.preflight.outputs.manifest }}
         run: |
           set -euo pipefail
+          args=()
+          if [[ "$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("channel", ""))' <<< "$RELEASE_MANIFEST")" != "" ]]; then
+            printf '%s' "$RELEASE_MANIFEST" > "$RUNNER_TEMP/release-manifest.json"
+            args+=(--release-manifest "$RUNNER_TEMP/release-manifest.json")
+          fi
           python3 repo/.github/scripts/angle_ci.py validate-release-assets \
             --artifact-root release-assets \
+            "${args[@]}" \
             --github-output "$GITHUB_OUTPUT"
 
       - name: Resolve release target
@@ -740,9 +783,19 @@ jobs:
           ARTIFACT_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.artifact_run_id != '' && inputs.artifact_run_id || '' }}
           INPUT_ANGLE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.angle_commit || '' }}
           PREFLIGHT_BUILD_REF: ${{ needs.preflight.outputs.build_ref }}
+          RELEASE_MANIFEST: ${{ needs.preflight.outputs.manifest }}
         run: |
           set -euo pipefail
+          manifest_channel="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("channel", ""))' <<< "$RELEASE_MANIFEST")"
           target_sha="$ARTIFACT_COMMIT"
+          if [[ -n "$manifest_channel" ]]; then
+            target_sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["tagCommit"])' <<< "$RELEASE_MANIFEST")"
+            manifest_angle="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["angleCommit"])' <<< "$RELEASE_MANIFEST")"
+            if [[ "$manifest_angle" != "$ARTIFACT_COMMIT" ]]; then
+              echo "::error::Release manifest source $manifest_angle differs from archive source $ARTIFACT_COMMIT"
+              exit 1
+            fi
+          fi
           if [[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::Invalid ANGLE commit in release assets: $target_sha"
             exit 1
@@ -752,12 +805,12 @@ jobs:
               echo "::error::Invalid requested ANGLE commit: $INPUT_ANGLE_COMMIT"
               exit 1
             fi
-            if [[ "$target_sha" != "$INPUT_ANGLE_COMMIT"* ]]; then
-              echo "::error::Release assets were built from $target_sha, requested $INPUT_ANGLE_COMMIT"
+            if [[ "$ARTIFACT_COMMIT" != "$INPUT_ANGLE_COMMIT"* ]]; then
+              echo "::error::Release assets were built from $ARTIFACT_COMMIT, requested $INPUT_ANGLE_COMMIT"
               exit 1
             fi
           fi
-          if [[ -z "$ARTIFACT_RUN_ID" && "$PREFLIGHT_BUILD_REF" != "$target_sha" ]]; then
+          if [[ -z "$ARTIFACT_RUN_ID" && -z "$manifest_channel" && "$PREFLIGHT_BUILD_REF" != "$target_sha" ]]; then
             echo "::error::Release assets were built from $target_sha, expected $PREFLIGHT_BUILD_REF"
             exit 1
           fi
@@ -770,12 +823,24 @@ jobs:
 
       - name: Resolve release tag
         shell: bash
+        env:
+          RELEASE_MANIFEST: ${{ needs.preflight.outputs.manifest }}
         run: |
           set -euo pipefail
-          explicit_tag="${{ inputs.release_tag }}"
-          if [[ -n "$explicit_tag" ]]; then
-            tag="$explicit_tag"
+          manifest_channel="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("channel", ""))' <<< "$RELEASE_MANIFEST")"
+          if [[ -n "$manifest_channel" ]]; then
+            tag="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["releaseTag"])' <<< "$RELEASE_MANIFEST")"
+            title="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["releaseTitle"])' <<< "$RELEASE_MANIFEST")"
+            echo "RELEASE_TITLE=$title" >> "$GITHUB_ENV"
+            echo "RELEASE_CHANNEL=$manifest_channel" >> "$GITHUB_ENV"
+            printf '%s' "$RELEASE_MANIFEST" > "$RUNNER_TEMP/release-manifest.json"
+            echo "RELEASE_MANIFEST_PATH=$RUNNER_TEMP/release-manifest.json" >> "$GITHUB_ENV"
+            echo "RELEASE_TAG_EXPLICIT=0" >> "$GITHUB_ENV"
           else
+            explicit_tag="${{ inputs.release_tag }}"
+            if [[ -n "$explicit_tag" ]]; then
+              tag="$explicit_tag"
+            else
             assets=()
             while IFS= read -r asset; do
               assets+=("$asset")
@@ -794,22 +859,28 @@ jobs:
               exit 1
             fi
             tag="angle-$version"
+            fi
+            echo "RELEASE_TITLE=$tag" >> "$GITHUB_ENV"
+            echo "RELEASE_CHANNEL=dev" >> "$GITHUB_ENV"
+            echo "RELEASE_TAG_EXPLICIT=$([[ -n "$explicit_tag" ]] && echo 1 || echo 0)" >> "$GITHUB_ENV"
           fi
           echo "Release tag: $tag"
-          if [[ -n "$explicit_tag" ]]; then
-            echo "RELEASE_TAG_EXPLICIT=1" >> "$GITHUB_ENV"
-          else
-            echo "RELEASE_TAG_EXPLICIT=0" >> "$GITHUB_ENV"
-          fi
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
 
       - name: Prepare release notes
         shell: bash
         run: |
           set -euo pipefail
-          python3 repo/.github/scripts/angle_ci.py release-notes \
-            --artifact-root release-assets \
-            --output release-notes.md
+          if [[ -n "${RELEASE_MANIFEST_PATH:-}" ]]; then
+            python3 repo/.github/scripts/release_channel.py release-notes \
+              --manifest "$RELEASE_MANIFEST_PATH" \
+              --artifact-root release-assets \
+              --output release-notes.md
+          else
+            python3 repo/.github/scripts/angle_ci.py release-notes \
+              --artifact-root release-assets \
+              --output release-notes.md
+          fi
           cat release-notes.md
 
       - name: Create or update GitHub Release
@@ -819,57 +890,79 @@ jobs:
         run: |
           set -euo pipefail
           tag="$RELEASE_TAG"
-          cd repo
-          git fetch --force origin "+refs/tags/$tag:refs/tags/$tag" || true
-          tag_exists=0
-          tag_needs_update=0
-          if git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null; then
-            tag_exists=1
-            tag_commit="$(git rev-parse "refs/tags/$tag^{commit}")"
-            if [[ "$tag_commit" != "$RELEASE_TARGET_SHA" ]]; then
-              if [[ "$RELEASE_TAG_EXPLICIT" != "1" ]]; then
-                echo "Tag $tag points to $tag_commit; will move it to release target $RELEASE_TARGET_SHA"
-                tag_needs_update=1
-              else
-                echo "::error::Tag $tag points to $tag_commit, not release target $RELEASE_TARGET_SHA"
-                exit 1
-              fi
-            fi
-          else
-            tag_needs_update=1
+          assets=()
+          while IFS= read -r asset; do assets+=("$asset"); done < <(find release-assets -maxdepth 1 -type f | sort)
+          if [[ "${#assets[@]}" -ne 7 ]]; then
+            echo "::error::Expected exactly 7 release assets; found ${#assets[@]}"
+            exit 1
           fi
-          # gh release create --target creates a missing tag at the requested
-          # commit. An explicit push is only needed to move an existing tag.
-          if [[ "$tag_exists" == "1" && "$tag_needs_update" == "1" ]]; then
-            git tag -f "$tag" "$RELEASE_TARGET_SHA"
-            if ! git push --force origin "refs/tags/$tag"; then
-              echo "::error::Could not point tag $tag at $RELEASE_TARGET_SHA. Configure RELEASE_TOKEN with repo and workflow scopes when releasing a commit other than the workflow commit."
+          git -C repo fetch --no-tags origin "$RELEASE_TARGET_SHA"
+          git -C repo cat-file -e "$RELEASE_TARGET_SHA^{commit}"
+          git -C repo fetch origin "+refs/tags/$tag:refs/tags/$tag" 2>/dev/null || true
+          tag_commit=""
+          if git -C repo rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null; then
+            tag_commit="$(git -C repo rev-parse "refs/tags/$tag^{commit}")"
+            if [[ "$tag_commit" != "$RELEASE_TARGET_SHA" ]]; then
+              echo "::error::Tag $tag points to $tag_commit; expected $RELEASE_TARGET_SHA"
               exit 1
             fi
           fi
-          cd ..
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$tag" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
+
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" 2>/dev/null || true)"
+          if [[ -n "$release_json" ]]; then
+            if [[ -z "$tag_commit" ]]; then
+              echo "::error::Release $tag exists but its tag could not be verified"
+              exit 1
+            fi
+            is_draft="$(python3 -c 'import json,sys; print(str(json.load(sys.stdin)["draft"]).lower())' <<< "$release_json")"
+            if [[ "$is_draft" != "true" ]]; then
+              if [[ -z "${RELEASE_MANIFEST_PATH:-}" ]]; then
+                echo "::error::Release $tag is already public; refusing to replace its assets"
+                exit 1
+              fi
+              old_manifest="$(python3 -c 'import json,re,sys; body=json.load(sys.stdin).get("body", ""); m=re.search(r"^ANGLE-RELEASE-MANIFEST=(\{.*\})$", body, re.M); print(m.group(1) if m else "")' <<< "$release_json")"
+              expected_manifest="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])),sort_keys=True))' "$RELEASE_MANIFEST_PATH")"
+              if [[ "$old_manifest" != "$expected_manifest" ]]; then
+                echo "::error::Published release $tag has different source provenance"
+                exit 1
+              fi
+              python3 -c 'import json,sys; r=json.load(sys.stdin); expected=sorted(x.split("/",1)[-1] for x in sys.argv[1:]); actual=sorted(a["name"] for a in r.get("assets",[])); assert len(actual)==7 and actual==expected, f"published release asset mismatch: {actual!r}"' "${assets[@]}" <<< "$release_json"
+              echo "Release $tag is already published with matching provenance and assets; no changes made"
+              exit 0
+            fi
+            if [[ -n "${RELEASE_MANIFEST_PATH:-}" ]]; then
+              old_manifest="$(python3 -c 'import json,re,sys; body=json.load(sys.stdin).get("body", ""); m=re.search(r"^ANGLE-RELEASE-MANIFEST=(\{.*\})$", body, re.M); print(m.group(1) if m else "")' <<< "$release_json")"
+              expected_manifest="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])),sort_keys=True))' "$RELEASE_MANIFEST_PATH")"
+              if [[ "$old_manifest" != "$expected_manifest" ]]; then
+                echo "::error::Existing draft $tag has different source provenance; refusing to reuse it"
+                exit 1
+              fi
+            fi
+            gh release upload "$tag" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$tag" release-assets/* \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$RELEASE_TARGET_SHA" \
-              --title "$tag" \
-              --notes-file release-notes.md
+            create_args=("$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$RELEASE_TARGET_SHA" --title "$RELEASE_TITLE" --notes-file release-notes.md --draft)
+            if [[ "$RELEASE_CHANNEL" == "dev" ]]; then
+              create_args+=(--prerelease)
+            fi
+            gh release create "${create_args[@]}"
           fi
-          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq .id)"
-          release_target="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq .target_commitish)"
-          if [[ "$release_target" != "$RELEASE_TARGET_SHA" ]]; then
-            gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
-              -f target_commitish="$RELEASE_TARGET_SHA" >/dev/null
+
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
+          python3 -c 'import json,sys; r=json.load(sys.stdin); expected=sorted(x.split("/",1)[-1] for x in sys.argv[1:]); actual=sorted(a["name"] for a in r.get("assets",[])); assert len(actual)==7 and actual==expected, f"release asset mismatch: {actual!r}"' "${assets[@]}" <<< "$release_json"
+          if [[ -z "$tag_commit" ]]; then
+            git -C repo fetch origin "+refs/tags/$tag:refs/tags/$tag"
+            tag_commit="$(git -C repo rev-parse "refs/tags/$tag^{commit}")"
           fi
-          release_target="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq .target_commitish)"
-          if [[ "$release_target" != "$RELEASE_TARGET_SHA" ]]; then
-            echo "::error::Release $tag targets $release_target, not $RELEASE_TARGET_SHA"
+          if [[ "$tag_commit" != "$RELEASE_TARGET_SHA" ]]; then
+            echo "::error::Published tag $tag points to $tag_commit, not $RELEASE_TARGET_SHA"
             exit 1
           fi
-          actual_tag_commit="$(git -C repo ls-remote --tags origin "refs/tags/$tag" | awk '{print $1}')"
-          if [[ "$actual_tag_commit" != "$RELEASE_TARGET_SHA" ]]; then
-            echo "::error::Tag $tag points to ${actual_tag_commit:-unknown}, not $RELEASE_TARGET_SHA"
-            exit 1
+          publish_args=(--draft=false --repo "$GITHUB_REPOSITORY")
+          if [[ "$RELEASE_CHANNEL" == "stable" ]]; then
+            publish_args+=(--latest --prerelease=false)
+          else
+            publish_args+=(--prerelease)
           fi
+          gh release edit "$tag" "${publish_args[@]}"
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
+          python3 -c 'import json,sys; r=json.load(sys.stdin); assert not r["draft"]; assert r["prerelease"] == (sys.argv[1] == "dev")' "$RELEASE_CHANNEL" <<< "$release_json"

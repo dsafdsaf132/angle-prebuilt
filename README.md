@@ -3,7 +3,9 @@
 This repository tracks upstream [google/ANGLE](https://github.com/google/angle) and publishes ready-to-use archives for
 native EGL/OpenGL ES consumers.
 
-It syncs, builds, and releases every Sunday at 00:00 UTC.
+It publishes two channels: Chrome Stable is checked daily at 23:00 UTC and rebuilt only when its pinned ANGLE commit has not been released; Dev builds run weekly on the existing Saturday 23:00 UTC sync schedule.
+
+Stable release names include the Chrome version and the 7-character upstream ANGLE SHA, for example `angle-stable-chrome-123.0.0.0-a1b2c3d`. Dev releases include the UTC date and the same 7-character upstream SHA, for example `angle-dev-2026-09-27-a1b2c3d`. Each release records the full upstream SHA in `angle-build.json` and its release notes.
 
 ## Targets
 

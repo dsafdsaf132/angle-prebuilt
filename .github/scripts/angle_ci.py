@@ -910,12 +910,31 @@ def write_build_json(package_root, args, gn_args):
         .replace("+00:00", "Z"),
         "gnArgs": gn_args,
     }
+    if args.release_manifest:
+        manifest = load_json(args.release_manifest)
+        metadata.update(
+            {
+                "channel": manifest["channel"],
+                "upstreamCommit": manifest["upstreamCommit"],
+                "workflowCommit": manifest["workflowCommit"],
+                "releaseTag": manifest["releaseTag"],
+                "releaseTitle": manifest["releaseTitle"],
+                "releaseDate": manifest["releaseDate"],
+                "sourceUrl": manifest["sourceUrl"],
+                "chromeVersion": manifest["chromeVersion"],
+                "chromiumCommit": manifest["chromiumCommit"],
+                "tagCommit": manifest["tagCommit"],
+            }
+        )
     (package_root / "angle" / "angle-build.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
 
 def archive_name(version, target_platform, arch):
+    if version.startswith(("angle-stable-", "angle-dev-")):
+        extension = "zip" if target_platform == "win32" else "tar.gz"
+        return f"{version}-{target_platform}-{arch}.{extension}"
     if target_platform == "win32":
         return f"angle-{version}-{target_platform}-{arch}.zip"
     return f"angle-{version}-{target_platform}-{arch}.tar.gz"
@@ -948,7 +967,11 @@ def create_package(args):
     artifact_dir = Path(args.artifact_dir).resolve()
     artifact_dir.mkdir(parents=True, exist_ok=True)
     gn_args = load_json(args.gn_args_json)
-    version = parse_angle_version(source_root, args.angle_ref)
+    version = (
+        load_json(args.release_manifest)["releaseTag"]
+        if args.release_manifest
+        else parse_angle_version(source_root, args.angle_ref)
+    )
 
     with tempfile.TemporaryDirectory() as temp:
         package_root = Path(temp) / "package"
@@ -1327,12 +1350,21 @@ def create_universal(args):
                 "arm64": arm64_meta,
             },
         }
+        for key in (
+            "channel", "upstreamCommit", "workflowCommit", "releaseTag",
+            "releaseTitle", "releaseDate", "sourceUrl", "chromeVersion",
+            "chromiumCommit", "tagCommit",
+        ):
+            if key in x64_meta:
+                if x64_meta.get(key) != arm64_meta.get(key):
+                    raise RuntimeError(f"macOS slices disagree on {key}")
+                metadata[key] = x64_meta[key]
         (stage_root / "angle" / "angle-build.json").write_text(
             json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
 
-        version = archive_version_from_name(args.x64_archive)
-        archive_path = artifact_dir / f"angle-{version}-darwin-universal.tar.gz"
+        version = metadata.get("releaseTag") or archive_version_from_name(args.x64_archive)
+        archive_path = artifact_dir / archive_name(version, "darwin", "universal")
         create_tar_gz(stage_root, archive_path)
 
     print(f"archive={archive_path}")
@@ -1382,6 +1414,7 @@ def validate_release_assets(args):
     seen = {}
     versions = set()
     commits = set()
+    manifests = []
     for archive in archives:
         version, suffix = parse_release_asset_name(archive.name)
         if suffix in seen:
@@ -1402,6 +1435,18 @@ def validate_release_assets(args):
             if not commit:
                 raise RuntimeError(f"{archive.name} metadata is missing angleCommit")
             commits.add(commit)
+            if getattr(args, "release_manifest", None):
+                expected = load_json(args.release_manifest)
+                manifests.append(metadata)
+                for key in (
+                    "channel", "upstreamCommit", "workflowCommit", "releaseTag",
+                    "releaseTitle", "releaseDate", "chromeVersion", "chromiumCommit",
+                    "sourceUrl", "tagCommit",
+                ):
+                    if metadata.get(key) != expected.get(key):
+                        raise RuntimeError(
+                            f"{archive.name} metadata {key} differs from release manifest"
+                        )
 
     missing = sorted(set(EXPECTED_RELEASE_ARCHIVES) - set(seen))
     extra = sorted(set(seen) - set(EXPECTED_RELEASE_ARCHIVES))
@@ -1409,6 +1454,12 @@ def validate_release_assets(args):
         raise RuntimeError(f"Release archive set mismatch; missing={missing}, extra={extra}")
     if len(versions) != 1:
         raise RuntimeError(f"Release archives contain multiple versions: {sorted(versions)}")
+    if getattr(args, "release_manifest", None):
+        release_manifest = load_json(args.release_manifest)
+        if versions != {release_manifest.get("releaseTag")}:
+            raise RuntimeError(
+                f"Release archive names do not match manifest tag {release_manifest.get('releaseTag')}"
+            )
     if len(commits) != 1:
         raise RuntimeError(f"Release archives contain multiple ANGLE commits: {sorted(commits)}")
     commit = next(iter(commits))
@@ -1417,6 +1468,8 @@ def validate_release_assets(args):
     if args.github_output:
         with Path(args.github_output).open("a", encoding="utf-8") as output:
             output.write(f"angle_commit={commit}\n")
+    if args.release_manifest and len(manifests) != len(EXPECTED_RELEASE_ARCHIVES):
+        raise RuntimeError("Not all archives contain channel release metadata")
 
     print(f"release-assets ok: version={next(iter(versions))} commit={commit}")
 
@@ -1427,6 +1480,9 @@ def parse_release_asset_name(name):
     for suffix in EXPECTED_RELEASE_ARCHIVES:
         full_suffix = f"-{suffix}"
         if name.endswith(full_suffix):
+            if name.startswith(("angle-stable-", "angle-dev-")):
+                version = name[: -len(full_suffix)]
+                return version, suffix
             version = name[len("angle-") : -len(full_suffix)]
             if not version:
                 raise RuntimeError(f"Missing version in release archive name: {name}")
@@ -1698,6 +1754,7 @@ def main():
     package.add_argument("--angle-ref", required=True)
     package.add_argument("--angle-commit", required=True)
     package.add_argument("--gn-args-json", required=True)
+    package.add_argument("--release-manifest")
     package.set_defaults(func=create_package)
 
     verify = subparsers.add_parser("verify")
@@ -1732,6 +1789,7 @@ def main():
     release_assets = subparsers.add_parser("validate-release-assets")
     release_assets.add_argument("--artifact-root", required=True)
     release_assets.add_argument("--expected-commit")
+    release_assets.add_argument("--release-manifest")
     release_assets.add_argument("--github-output")
     release_assets.set_defaults(func=validate_release_assets)
 
