@@ -961,7 +961,6 @@ jobs:
               exit 1
             fi
           fi
-
           release_json_path="$RUNNER_TEMP/existing-release.json"
           release_status="$(curl -sS \
             --retry 5 \
@@ -977,14 +976,48 @@ jobs:
             release_json="$(cat "$release_json_path")"
           elif [[ "$release_status" == "404" ]]; then
             release_json=""
+            release_list_path="$RUNNER_TEMP/releases.json"
+            release_page=1
+            while true; do
+              release_list_status="$(curl -sS \
+                --retry 5 \
+                --retry-delay 5 \
+                --retry-all-errors \
+                --connect-timeout 20 \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                -o "$release_list_path" \
+                -w "%{http_code}" \
+                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases?per_page=100&page=$release_page")"
+              if [[ "$release_list_status" != "200" ]]; then
+                echo "::error::Could not list releases while checking $tag; HTTP status $release_list_status"
+                exit 1
+              fi
+              release_json="$(python3 -c 'import json,sys; releases=json.load(sys.stdin); match=next((release for release in releases if release.get("tag_name")==sys.argv[1]), None); print(json.dumps(match) if match else "")' "$tag" < "$release_list_path")"
+              if [[ -n "$release_json" ]] ||
+                [[ "$(python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' < "$release_list_path")" -lt 100 ]]; then
+                break
+              fi
+              release_page=$((release_page + 1))
+            done
           else
             echo "::error::Could not check release $tag; HTTP status $release_status"
             exit 1
           fi
-          if [[ "$release_status" == "200" ]]; then
+          ensure_release_tag() {
             if [[ -z "$tag_commit" ]]; then
-              echo "::error::Release $tag exists but its tag could not be verified"
-              exit 1
+              git -C repo tag "$tag" "$RELEASE_TARGET_SHA"
+              git -C repo push origin "refs/tags/$tag"
+              tag_commit="$RELEASE_TARGET_SHA"
+            fi
+          }
+          if [[ -n "$release_json" ]]; then
+            if [[ -z "$tag_commit" ]]; then
+              release_target="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("target_commitish", ""))' <<< "$release_json")"
+              if [[ "$release_target" != "$RELEASE_TARGET_SHA" ]]; then
+                echo "::error::Release $tag targets $release_target; expected $RELEASE_TARGET_SHA"
+                exit 1
+              fi
             fi
             is_draft="$(python3 -c 'import json,sys; print(str(json.load(sys.stdin)["draft"]).lower())' <<< "$release_json")"
             if [[ "$is_draft" != "true" ]]; then
@@ -999,6 +1032,7 @@ jobs:
                 exit 1
               fi
               python3 -c 'import json,sys; r=json.load(sys.stdin); expected=sorted(x.split("/",1)[-1] for x in sys.argv[1:]); actual=sorted(a["name"] for a in r.get("assets",[])); assert len(actual)==7 and actual==expected, f"published release asset mismatch: {actual!r}"' "${assets[@]}" <<< "$release_json"
+              ensure_release_tag
               echo "Release $tag is already published with matching provenance and assets; no changes made"
               exit 0
             fi
@@ -1010,8 +1044,10 @@ jobs:
                 exit 1
               fi
             fi
+            ensure_release_tag
             gh release upload "$tag" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
           else
+            ensure_release_tag
             create_args=("$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$RELEASE_TARGET_SHA" --title "$RELEASE_TITLE" --notes-file release-notes.md --draft)
             if [[ "$RELEASE_CHANNEL" == "dev" ]]; then
               create_args+=(--prerelease)
