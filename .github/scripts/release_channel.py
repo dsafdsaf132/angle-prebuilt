@@ -243,6 +243,8 @@ def make_release_notes(manifest, artifact_root):
     from pathlib import Path
 
     names = sorted(path.name for path in Path(artifact_root).iterdir() if path.is_file())
+    release_manifest = dict(manifest)
+    release_manifest.pop("workflowCommit", None)
     body = [
         f"Release: {manifest['releaseTitle']}",
         f"Tag: `{manifest['releaseTag']}`",
@@ -250,7 +252,6 @@ def make_release_notes(manifest, artifact_root):
         f"Channel: {manifest['channel']}",
         f"Upstream ANGLE: `{manifest['upstreamCommit']}`",
         f"Source: {manifest['sourceUrl']}",
-        f"Workflow commit: `{manifest['workflowCommit']}`",
     ]
     if manifest.get("chromeVersion"):
         body.extend(
@@ -265,7 +266,7 @@ def make_release_notes(manifest, artifact_root):
             "<details>",
             "<summary>Release provenance</summary>",
             "",
-            "ANGLE-RELEASE-MANIFEST=" + json.dumps(manifest, sort_keys=True),
+            "ANGLE-RELEASE-MANIFEST=" + json.dumps(release_manifest, sort_keys=True),
             "",
             "</details>",
         ]
