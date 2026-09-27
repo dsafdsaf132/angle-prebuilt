@@ -961,25 +961,43 @@ jobs:
               exit 1
             fi
           fi
-          release_json_path="$RUNNER_TEMP/existing-release.json"
-          release_status="$(curl -sS \
-            --retry 5 \
-            --retry-delay 5 \
-            --retry-all-errors \
-            --connect-timeout 20 \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -o "$release_json_path" \
-            -w "%{http_code}" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
-          if [[ "$release_status" == "200" ]]; then
-            release_json="$(cat "$release_json_path")"
-          elif [[ "$release_status" == "404" ]]; then
-            release_json=""
-            release_list_path="$RUNNER_TEMP/releases.json"
-            release_page=1
+          lookup_release() {
+            local release_json_path="$RUNNER_TEMP/existing-release.json"
+            local release_status
+            if ! release_status="$(curl -sS \
+              --retry 5 \
+              --retry-delay 5 \
+              --retry-all-errors \
+              --connect-timeout 20 \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -o "$release_json_path" \
+              -w "%{http_code}" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/tags/$tag")"; then
+              echo "::error::Could not check release $tag" >&2
+              return 1
+            fi
+            if [[ "$release_status" == "200" ]]; then
+              local release_json
+              if ! release_json="$(python3 -c 'import json,sys; release=json.load(sys.stdin); assert isinstance(release,dict); print(json.dumps(release))' < "$release_json_path")"; then
+                echo "::error::Could not parse release response while checking $tag" >&2
+                return 1
+              fi
+              printf '%s' "$release_json"
+              return
+            fi
+            if [[ "$release_status" != "404" ]]; then
+              echo "::error::Could not check release $tag; HTTP status $release_status" >&2
+              return 1
+            fi
+
+            local release_list_path="$RUNNER_TEMP/releases.json"
+            local release_page=1
+            local release_json=""
+            local release_list_status
+            local release_count
             while true; do
-              release_list_status="$(curl -sS \
+              if ! release_list_status="$(curl -sS \
                 --retry 5 \
                 --retry-delay 5 \
                 --retry-all-errors \
@@ -988,22 +1006,34 @@ jobs:
                 -H "Accept: application/vnd.github+json" \
                 -o "$release_list_path" \
                 -w "%{http_code}" \
-                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases?per_page=100&page=$release_page")"
-              if [[ "$release_list_status" != "200" ]]; then
-                echo "::error::Could not list releases while checking $tag; HTTP status $release_list_status"
-                exit 1
+                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases?per_page=100&page=$release_page")"; then
+                echo "::error::Could not list releases while checking $tag" >&2
+                return 1
               fi
-              release_json="$(python3 -c 'import json,sys; releases=json.load(sys.stdin); match=next((release for release in releases if release.get("tag_name")==sys.argv[1]), None); print(json.dumps(match) if match else "")' "$tag" < "$release_list_path")"
-              if [[ -n "$release_json" ]] ||
-                [[ "$(python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' < "$release_list_path")" -lt 100 ]]; then
+              if [[ "$release_list_status" != "200" ]]; then
+                echo "::error::Could not list releases while checking $tag; HTTP status $release_list_status" >&2
+                return 1
+              fi
+              if ! release_json="$(python3 -c 'import json,sys; releases=json.load(sys.stdin); assert isinstance(releases,list); match=next((release for release in releases if release.get("tag_name")==sys.argv[1]), None); print(json.dumps(match) if match else "")' "$tag" < "$release_list_path")"; then
+                echo "::error::Could not parse release list while checking $tag" >&2
+                return 1
+              fi
+              if ! release_count="$(python3 -c 'import json,sys; releases=json.load(sys.stdin); assert isinstance(releases,list); print(len(releases))' < "$release_list_path")"; then
+                echo "::error::Could not parse release count while checking $tag" >&2
+                return 1
+              fi
+              if [[ ! "$release_count" =~ ^[0-9]+$ ]]; then
+                echo "::error::Invalid release count while checking $tag: $release_count" >&2
+                return 1
+              fi
+              if [[ -n "$release_json" ]] || (( release_count < 100 )); then
                 break
               fi
               release_page=$((release_page + 1))
             done
-          else
-            echo "::error::Could not check release $tag; HTTP status $release_status"
-            exit 1
-          fi
+            printf '%s' "$release_json"
+          }
+          release_json="$(lookup_release)"
           ensure_release_tag() {
             if [[ -z "$tag_commit" ]]; then
               git -C repo tag "$tag" "$RELEASE_TARGET_SHA"
@@ -1060,7 +1090,7 @@ jobs:
             gh release create "${create_args[@]}"
           fi
 
-          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
+          release_json="$(lookup_release)"
           python3 -c 'import json,sys; r=json.load(sys.stdin); expected=sorted(x.split("/",1)[-1] for x in sys.argv[1:]); actual=sorted(a["name"] for a in r.get("assets",[])); assert len(actual)==7 and actual==expected, f"release asset mismatch: {actual!r}"' "${assets[@]}" <<< "$release_json"
           if [[ -z "$tag_commit" ]]; then
             git -C repo fetch origin "+refs/tags/$tag:refs/tags/$tag"
@@ -1077,5 +1107,5 @@ jobs:
             publish_args+=(--prerelease)
           fi
           gh release edit "$tag" "${publish_args[@]}"
-          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
+          release_json="$(lookup_release)"
           python3 -c 'import json,sys; r=json.load(sys.stdin); assert not r["draft"]; assert r["prerelease"] == (sys.argv[1] == "dev")' "$RELEASE_CHANNEL" <<< "$release_json"
