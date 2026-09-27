@@ -93,7 +93,7 @@ def resolve_dev(args):
         "schemaVersion": 1,
         "channel": "dev",
         "releaseTag": tag,
-        "releaseTitle": f"Dev · {date} · ANGLE {upstream_commit[:7]}",
+        "releaseTitle": f"Dev · {date}",
         "releaseDate": date,
         "angleRef": args["angle_ref"],
         "angleCommit": angle_commit,
@@ -246,12 +246,10 @@ def make_release_notes(manifest, artifact_root):
     names = sorted(path.name for path in Path(artifact_root).iterdir() if path.is_file())
     release_manifest = dict(manifest)
     release_manifest.pop("workflowCommit", None)
-    upstream_url = manifest["sourceUrl"].rstrip("/")
-    if manifest.get("channel") == "stable":
-        upstream_url = (
-            "https://github.com/google/ANGLE/commit/"
-            f"{manifest['upstreamCommit']}"
-        )
+    upstream_url = (
+        "https://github.com/google/ANGLE/commit/"
+        f"{manifest['upstreamCommit']}"
+    )
     body = [
         f"Release: {manifest['releaseTitle']}",
         f"Tag: `{manifest['releaseTag']}`",
