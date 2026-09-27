@@ -55,6 +55,9 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Check out workflow repository
+        uses: actions/checkout@v7
+
       - name: Decide whether to build
         id: decide
         shell: bash
