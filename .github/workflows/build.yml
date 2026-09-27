@@ -53,7 +53,7 @@ jobs:
       build_ref: ${{ steps.decide.outputs.build_ref }}
       manifest: ${{ steps.decide.outputs.manifest }}
     permissions:
-      contents: read
+      contents: write
     steps:
       - name: Check out workflow repository
         uses: actions/checkout@v7
@@ -1011,6 +1011,12 @@ jobs:
               tag_commit="$RELEASE_TARGET_SHA"
             fi
           }
+          release_manifests_match() {
+            printf '%s' "$release_json" > "$RUNNER_TEMP/release-to-compare.json"
+            [[ "$(python3 repo/.github/scripts/release_channel.py release-manifests-match \
+              --release-json "$RUNNER_TEMP/release-to-compare.json" \
+              --manifest "$RELEASE_MANIFEST_PATH")" == "true" ]]
+          }
           if [[ -n "$release_json" ]]; then
             if [[ -z "$tag_commit" ]]; then
               release_target="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("target_commitish", ""))' <<< "$release_json")"
@@ -1025,9 +1031,7 @@ jobs:
                 echo "::error::Release $tag is already public; refusing to replace its assets"
                 exit 1
               fi
-              old_manifest="$(python3 -c 'import json,re,sys; body=json.load(sys.stdin).get("body", ""); m=re.search(r"^ANGLE-RELEASE-MANIFEST=(\{.*\})$", body, re.M); print(m.group(1) if m else "")' <<< "$release_json")"
-              expected_manifest="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])),sort_keys=True))' "$RELEASE_MANIFEST_PATH")"
-              if [[ "$old_manifest" != "$expected_manifest" ]]; then
+              if ! release_manifests_match; then
                 echo "::error::Published release $tag has different source provenance"
                 exit 1
               fi
@@ -1037,15 +1041,16 @@ jobs:
               exit 0
             fi
             if [[ -n "${RELEASE_MANIFEST_PATH:-}" ]]; then
-              old_manifest="$(python3 -c 'import json,re,sys; body=json.load(sys.stdin).get("body", ""); m=re.search(r"^ANGLE-RELEASE-MANIFEST=(\{.*\})$", body, re.M); print(m.group(1) if m else "")' <<< "$release_json")"
-              expected_manifest="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])),sort_keys=True))' "$RELEASE_MANIFEST_PATH")"
-              if [[ "$old_manifest" != "$expected_manifest" ]]; then
+              if ! release_manifests_match; then
                 echo "::error::Existing draft $tag has different source provenance; refusing to reuse it"
                 exit 1
               fi
             fi
             ensure_release_tag
             gh release upload "$tag" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            if [[ -n "${RELEASE_MANIFEST_PATH:-}" ]]; then
+              gh release edit "$tag" --title "$RELEASE_TITLE" --notes-file release-notes.md --repo "$GITHUB_REPOSITORY"
+            fi
           else
             ensure_release_tag
             create_args=("$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$RELEASE_TARGET_SHA" --title "$RELEASE_TITLE" --notes-file release-notes.md --draft)

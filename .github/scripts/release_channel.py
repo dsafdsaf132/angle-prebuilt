@@ -62,6 +62,7 @@ def resolve_stable():
     date = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
     sha7 = angle[:7]
     tag = f"angle-stable-chrome-{version}-{sha7}"
+    workflow_commit = os.environ["GITHUB_SHA"]
     return {
         "schemaVersion": 1,
         "channel": "stable",
@@ -71,8 +72,8 @@ def resolve_stable():
         "angleRef": "upstream",
         "angleCommit": angle,
         "upstreamCommit": angle,
-        "workflowCommit": os.environ["GITHUB_SHA"],
-        "tagCommit": os.environ["GITHUB_SHA"],
+        "workflowCommit": workflow_commit,
+        "tagCommit": release_tag_commit(tag, workflow_commit),
         "chromeVersion": version,
         "chromiumCommit": chromium,
         "sourceUrl": ANGLE_URL.format(angle),
@@ -98,11 +99,62 @@ def resolve_dev(args):
         "angleCommit": angle_commit,
         "upstreamCommit": upstream_commit,
         "workflowCommit": workflow_commit,
-        "tagCommit": workflow_commit,
+        "tagCommit": release_tag_commit(tag, workflow_commit),
         "chromeVersion": "",
         "chromiumCommit": "",
         "sourceUrl": ANGLE_URL.format(upstream_commit),
     }
+
+
+def release_tag_commit(tag, default_commit):
+    repository = os.environ.get("GITHUB_REPOSITORY")
+    if not repository:
+        return default_commit
+
+    ref_url = (
+        f"https://api.github.com/repos/{repository}/git/ref/tags/"
+        f"{urllib.parse.quote(tag, safe='')}"
+    )
+    try:
+        ref = github_json(ref_url)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            release_url = (
+                f"https://api.github.com/repos/{repository}/releases/tags/"
+                f"{urllib.parse.quote(tag, safe='')}"
+            )
+            try:
+                release = github_json(release_url)
+            except urllib.error.HTTPError as release_error:
+                if release_error.code == 404:
+                    return default_commit
+                raise
+
+            manifest_match = re.search(
+                r"^ANGLE-RELEASE-MANIFEST=(\{.*\})$",
+                release.get("body", ""),
+                re.MULTILINE,
+            )
+            if manifest_match:
+                tag_commit = json.loads(manifest_match.group(1)).get("tagCommit", "")
+                if re.fullmatch(r"[0-9a-f]{40}", tag_commit):
+                    return tag_commit
+            target_commit = release.get("target_commitish", "")
+            if re.fullmatch(r"[0-9a-f]{40}", target_commit):
+                return target_commit
+            raise RuntimeError(
+                f"Release {tag} exists without a tag or verifiable target commit"
+            )
+        raise
+
+    obj = ref.get("object", {})
+    while obj.get("type") == "tag":
+        obj = github_json(obj["url"])
+    if obj.get("type") != "commit" or not re.fullmatch(
+        r"[0-9a-f]{40}", obj.get("sha", "")
+    ):
+        raise RuntimeError(f"Release tag {tag} does not resolve to a commit")
+    return obj["sha"]
 
 
 def release_asset_names(manifest):
@@ -172,6 +224,21 @@ def has_stable_release(repository, upstream_commit):
         page += 1
 
 
+def release_manifests_match(release, expected):
+    match = re.search(
+        r"^ANGLE-RELEASE-MANIFEST=(\{.*\})$",
+        release.get("body", ""),
+        re.MULTILINE,
+    )
+    if not match:
+        return False
+    existing = json.loads(match.group(1))
+    for manifest in (existing, expected):
+        manifest.pop("workflowCommit", None)
+        manifest.pop("releaseDate", None)
+    return existing == expected
+
+
 def make_release_notes(manifest, artifact_root):
     from pathlib import Path
 
@@ -219,6 +286,9 @@ def main():
     stable_check = commands.add_parser("has-stable-release")
     stable_check.add_argument("--repository", required=True)
     stable_check.add_argument("--upstream-commit", required=True)
+    compare = commands.add_parser("release-manifests-match")
+    compare.add_argument("--release-json", required=True)
+    compare.add_argument("--manifest", required=True)
     notes = commands.add_parser("release-notes")
     notes.add_argument("--manifest", required=True)
     notes.add_argument("--artifact-root", required=True)
@@ -232,6 +302,12 @@ def main():
         print(json.dumps(manifest, sort_keys=True))
     elif args.command == "has-stable-release":
         print("true" if has_stable_release(args.repository, args.upstream_commit) else "false")
+    elif args.command == "release-manifests-match":
+        from pathlib import Path
+
+        release = json.loads(Path(args.release_json).read_text(encoding="utf-8"))
+        expected = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
+        print("true" if release_manifests_match(release, expected) else "false")
     else:
         from pathlib import Path
 
