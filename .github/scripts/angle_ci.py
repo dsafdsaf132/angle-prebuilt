@@ -1401,6 +1401,7 @@ def release_notes(args):
 
 def validate_release_assets(args):
     artifact_root = Path(args.artifact_root)
+    release_manifest_path = getattr(args, "release_manifest", None)
     archives = sorted(
         path
         for path in artifact_root.rglob("*")
@@ -1435,8 +1436,8 @@ def validate_release_assets(args):
             if not commit:
                 raise RuntimeError(f"{archive.name} metadata is missing angleCommit")
             commits.add(commit)
-            if getattr(args, "release_manifest", None):
-                expected = load_json(args.release_manifest)
+            if release_manifest_path:
+                expected = load_json(release_manifest_path)
                 manifests.append(metadata)
                 for key in (
                     "channel", "upstreamCommit", "workflowCommit", "releaseTag",
@@ -1454,8 +1455,8 @@ def validate_release_assets(args):
         raise RuntimeError(f"Release archive set mismatch; missing={missing}, extra={extra}")
     if len(versions) != 1:
         raise RuntimeError(f"Release archives contain multiple versions: {sorted(versions)}")
-    if getattr(args, "release_manifest", None):
-        release_manifest = load_json(args.release_manifest)
+    if release_manifest_path:
+        release_manifest = load_json(release_manifest_path)
         if versions != {release_manifest.get("releaseTag")}:
             raise RuntimeError(
                 f"Release archive names do not match manifest tag {release_manifest.get('releaseTag')}"
@@ -1468,7 +1469,7 @@ def validate_release_assets(args):
     if args.github_output:
         with Path(args.github_output).open("a", encoding="utf-8") as output:
             output.write(f"angle_commit={commit}\n")
-    if args.release_manifest and len(manifests) != len(EXPECTED_RELEASE_ARCHIVES):
+    if release_manifest_path and len(manifests) != len(EXPECTED_RELEASE_ARCHIVES):
         raise RuntimeError("Not all archives contain channel release metadata")
 
     print(f"release-assets ok: version={next(iter(versions))} commit={commit}")
