@@ -193,7 +193,16 @@ def make_release_notes(manifest, artifact_root):
             ]
         )
     body.extend(["", "Assets:", *(f"- `{name}`" for name in names), ""])
-    body.append("ANGLE-RELEASE-MANIFEST=" + json.dumps(manifest, sort_keys=True))
+    body.extend(
+        [
+            "<details>",
+            "<summary>Release provenance</summary>",
+            "",
+            "ANGLE-RELEASE-MANIFEST=" + json.dumps(manifest, sort_keys=True),
+            "",
+            "</details>",
+        ]
+    )
     return "\n".join(body) + "\n"
 
 
