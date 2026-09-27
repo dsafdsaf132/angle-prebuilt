@@ -962,8 +962,26 @@ jobs:
             fi
           fi
 
-          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" 2>/dev/null || true)"
-          if [[ -n "$release_json" ]]; then
+          release_json_path="$RUNNER_TEMP/existing-release.json"
+          release_status="$(curl -sS \
+            --retry 5 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            --connect-timeout 20 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -o "$release_json_path" \
+            -w "%{http_code}" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
+          if [[ "$release_status" == "200" ]]; then
+            release_json="$(cat "$release_json_path")"
+          elif [[ "$release_status" == "404" ]]; then
+            release_json=""
+          else
+            echo "::error::Could not check release $tag; HTTP status $release_status"
+            exit 1
+          fi
+          if [[ "$release_status" == "200" ]]; then
             if [[ -z "$tag_commit" ]]; then
               echo "::error::Release $tag exists but its tag could not be verified"
               exit 1
