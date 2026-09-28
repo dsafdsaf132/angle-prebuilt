@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Resolve channel metadata and validate versioned ANGLE release archives."""
 
+import base64
 import datetime
 import json
 import os
 import re
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -12,6 +14,7 @@ import urllib.request
 
 RELEASES_URL = "https://chromiumdash.appspot.com/fetch_releases"
 DEPS_URL = "https://chromium.googlesource.com/chromium/src/+/{}/DEPS?format=TEXT"
+GITHUB_RAW_DEPS_URL = "https://raw.githubusercontent.com/chromium/chromium/{}/DEPS"
 ANGLE_URL = "https://chromium.googlesource.com/angle/angle/+/{}/"
 
 
@@ -19,6 +22,20 @@ def fetch(url):
     request = urllib.request.Request(url, headers={"User-Agent": "ANGLE-Prebuilt-CI/1.0"})
     with urllib.request.urlopen(request, timeout=30) as response:
         return response.read()
+
+
+def fetch_stable_deps(chromium_commit):
+    try:
+        deps = fetch(DEPS_URL.format(chromium_commit))
+    except (urllib.error.URLError, TimeoutError) as error:
+        print(
+            f"Chromium googlesource DEPS fetch failed ({error}); "
+            "falling back to GitHub raw",
+            file=sys.stderr,
+        )
+        return fetch(GITHUB_RAW_DEPS_URL.format(chromium_commit)).decode("utf-8")
+
+    return base64.b64decode(deps).decode("utf-8")
 
 
 def resolve_stable():
@@ -39,10 +56,7 @@ def resolve_stable():
     if not re.fullmatch(r"[0-9a-f]{40}", angle):
         raise RuntimeError(f"Invalid Stable ANGLE commit: {angle!r}")
 
-    deps = fetch(DEPS_URL.format(chromium)).decode("ascii")
-    import base64
-
-    deps = base64.b64decode(deps).decode("utf-8")
+    deps = fetch_stable_deps(chromium)
     angle_entry = re.search(
         r"['\"]src/third_party/angle['\"]\s*:\s*([^\n]+)", deps
     )
