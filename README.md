@@ -5,6 +5,11 @@ native EGL/OpenGL ES consumers.
 
 Stable builds follow Chrome Stable and run daily. Dev builds follow upstream and run weekly after the Sunday 00:00 UTC sync.
 
+Stable selection uses VersionHistory to select the newest Windows Stable version
+that is currently served at 100% rollout. Limited rollout experiments are excluded.
+ChromiumDash supplies the Chromium and ANGLE commits for that exact version;
+resolution fails if a matching release cannot be found.
+
 Each archive records the full upstream SHA in `angle-build.json`.
 
 Archive filenames use the first 7 characters of the upstream SHA.

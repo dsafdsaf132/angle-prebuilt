@@ -13,6 +13,10 @@ import urllib.request
 
 
 RELEASES_URL = "https://chromiumdash.appspot.com/fetch_releases"
+STABLE_HISTORY_URL = (
+    "https://versionhistory.googleapis.com/v1/chrome/platforms/win/"
+    "channels/stable/versions/all/releases"
+)
 DEPS_URL = "https://chromium.googlesource.com/chromium/src/+/{}/DEPS?format=TEXT"
 GITHUB_RAW_DEPS_URL = "https://raw.githubusercontent.com/chromium/chromium/{}/DEPS"
 ANGLE_URL = "https://chromium.googlesource.com/angle/angle/+/{}/"
@@ -38,14 +42,51 @@ def fetch_stable_deps(chromium_commit):
     return base64.b64decode(deps).decode("utf-8")
 
 
+def select_stable_version(history):
+    candidates = []
+    for release in history.get("releases", []):
+        version = release.get("version", "")
+        serving = release.get("serving", {})
+        if (
+            release.get("fraction") != 1
+            or not serving.get("startTime")
+            or serving.get("endTime")
+            or not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", version)
+            or not release.get("name", "").startswith(
+                f"chrome/platforms/win/channels/stable/versions/{version}/releases/"
+            )
+        ):
+            continue
+        candidates.append((tuple(map(int, version.split("."))), version))
+    if not candidates:
+        raise RuntimeError("VersionHistory returned no active fully rolled-out Windows Stable release")
+    return max(candidates)[1]
+
+
+def select_stable_release(version, releases):
+    for release in releases:
+        if (
+            release.get("version") == version
+            and release.get("channel") == "Stable"
+            and release.get("platform") == "Windows"
+        ):
+            return release
+    raise RuntimeError(
+        f"ChromiumDash has no Windows Stable release matching verified {version}"
+    )
+
+
 def resolve_stable():
+    history_query = urllib.parse.urlencode(
+        {"filter": "endtime=none,fraction=1", "order_by": "version desc", "pageSize": 1}
+    )
+    history = json.loads(fetch(f"{STABLE_HISTORY_URL}?{history_query}"))
+    verified_version = select_stable_version(history)
     query = urllib.parse.urlencode(
-        {"channel": "Stable", "platform": "Windows", "num": 1}
+        {"channel": "Stable", "platform": "Windows", "num": 100}
     )
     releases = json.loads(fetch(f"{RELEASES_URL}?{query}"))
-    if not releases or releases[0].get("channel") != "Stable":
-        raise RuntimeError("ChromiumDash returned no Windows Stable release")
-    release = releases[0]
+    release = select_stable_release(verified_version, releases)
     version = release.get("version", "")
     chromium = release.get("hashes", {}).get("chromium", "")
     angle = release.get("hashes", {}).get("angle", "")
