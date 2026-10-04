@@ -3273,6 +3273,15 @@ class ImageHelper final : public Resource, public angle::Subject
                uint32_t layerCount,
                OutsideRenderPassCommandBuffer *commandBuffer);
 
+    angle::Result clearPartial(ContextVk *contextVk,
+                               VkImageAspectFlags aspectFlags,
+                               const VkClearValue &value,
+                               LevelIndex mipLevel,
+                               LayerIndex baseArrayLayer,
+                               uint32_t layerCount,
+                               const gl::Rectangle &clearArea,
+                               OutsideRenderPassCommandBufferHelper **commandBuffer);
+
     void clearColor(Renderer *renderer,
                     const VkClearColorValue &color,
                     LevelIndex baseMipLevelVk,
@@ -3583,6 +3592,9 @@ class ImageHelper final : public Resource, public angle::Subject
     bool mTileMemoryCompatible;
     // True if it actually uses tile memory.
     bool mUseTileMemory;
+    // True if the tile memory image also supports VK_IMAGE_USAGE_TRANSFER_SRC_BIT, allowing
+    // vkCmdCopyImage to be used instead of a shader-based copy during fallback.
+    bool mTileMemorySupportsTransferSrc;
 
     // Only used for swapChain images. This is set when an image is acquired and is waited on
     // by the next submission (which uses this image), at which point it is released.

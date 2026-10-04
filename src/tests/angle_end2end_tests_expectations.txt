@@ -250,6 +250,7 @@
 534082926 WIN INTEL VULKAN : TransformFeedbackTest.BufferRebinding/* = SKIP
 534082926 WIN INTEL VULKAN : TransformFeedbackTest.MultiplePaused/* = SKIP
 534082926 WIN INTEL VULKAN : TransformFeedbackTest.RecordTwiceWithBindingOffsetChange/* = SKIP
+568876655 WIN INTEL VULKAN : TransformFeedbackTest.InstancedAttributeAfterDisabledAttribDraw/* = SKIP
 534082926 WIN INTEL VULKAN : TransformFeedbackTestIOBlocks.Interleaved/* = SKIP
 40096690 WIN INTEL VULKAN : TextureBufferTestES31.UseAsXFBThenAsTextureBuffer/* = SKIP
 
@@ -662,6 +663,7 @@
 
 // D3D
 42264653 WIN D3D11 : GLSLTestLoops.*ContinueInSwitch/* = SKIP
+42264653 WIN D3D11 : GLSLTest_ES3.NestedSwitchContinueInEnclosingLoop3/* = SKIP
 // D3D does not support compressed textures where the base mip level is not a multiple of 4
 40644741 WIN D3D11 : DXT1CompressedTextureTest.NonBlockSizesMipLevels/* = SKIP
 42265582 WIN D3D11 : ClearTestRGB_ES3.*/* = SKIP
@@ -677,7 +679,6 @@
 40050019 WIN D3D11 : WebGL2GLSLTest.InitOutputParams/* = SKIP
 1456243 WIN D3D11 : WebGL2CompatibilityTest.DrawWithZeroSizedBuffer/* = SKIP
 42267092 WIN D3D11 : BlitFramebufferTest.FlippedBlits/* = SKIP
-520277980 WIN D3D11 : TextureCubeTestES3.CubeMapRedefinedWithBaseLevelChange/* = SKIP
 432303915 WIN D3D11 : GLSLTest.VerifyMaxFragmentUniformVectorsWithSamplers/* = SKIP
 432303915 WIN D3D11 : GLSLTest.VerifyMaxVertexUniformVectors/* = SKIP
 432303915 WIN D3D11 : GLSLTest.VerifyMaxVertexUniformVectorsWithSamplers/* = SKIP
@@ -693,12 +694,10 @@
 512896813 WIN D3D11 : LineLoopTestES3.LineLoopDrawElementsInstancedBaseVertexBaseInstance/* = SKIP
 514615434 WIN D3D11 : DrawBaseVertexBaseInstanceTest.NegativeBaseVertex/* = SKIP
 515698970 WIN D3D11 : DrawBaseVertexBaseInstanceTest_ES3.BaseInstanceSmallDivisorClientMemory/* = SKIP
-513847611 WIN D3D11 : ImageTestES3.MipLevelsNonZeroBaseLevel/* = SKIP
 526451592 WIN D3D11 : ImageTestES3.NonZeroLevelAndFace*/* = SKIP
 526451592 WIN D3D11 : ImageTestES3.NonZeroLevelCopyTexImageSrcDst/* = SKIP
 526451592 WIN D3D11 : ImageTestES3.NonZeroLevelTexSubImageDstWithUnpackSlow/* = SKIP
 526451592 WIN D3D11 : ImageTestES3.NonZeroLevelBlitDst/* = SKIP
-562992857 WIN D3D11 : MipmapTestES3.GenerateMipmapImmutableTextureNonZeroBaseLevel/* = SKIP
 
 // Android
 42264624 ANDROID GLES : GLSLTest_ES3.InitGlobalComplexConstant/* = SKIP
@@ -856,6 +855,7 @@
 546627192 PIXEL4ORXL GLES : GLSLTest_ES3.VaryingAnonymousStructAssignment/* = SKIP
 546627192 PIXEL4ORXL GLES : GLSLTest_ES3.VaryingAnonymousStructTernary/* = SKIP
 563868441 PIXEL4ORXL GLES : ComputeShaderTest.DispatchDrawBlend/* = SKIP
+568010373 PIXEL4ORXL GLES : WebGL2GLSLTest.UniformArrayDynamicIndexShortCircuit/* = SKIP
 
 42267082 PIXEL4ORXL GLES : BlobCacheTest.FragmentOutputLocationKey/* = SKIP
 42267082 PIXEL4ORXL GLES : EGLBlobCacheTest.FragmentOutputLocationKey/* = SKIP
@@ -883,9 +883,6 @@
 343218490 PIXEL4ORXL : GLSLTest_ES31.TernaryOnStructsInDifferentBlockStorages/* = SKIP
 
 346650202 PIXEL4ORXL : GeometryShaderTest.CreateAndAttachGeometryShaderOES/* = SKIP
-
-42266743 LINUX SWIFTSHADER : VulkanExternalImageTest.PreInitializedOnGLImportLinear*/* = SKIP
-42266743 LINUX INTEL VULKAN : VulkanExternalImageTest.PreInitializedOnGLImportLinear*/* = SKIP
 
 42264692 NEXUS5X GLES : DepthStencilTestES3.FramebufferClearThenStencilAttachedThenStencilTestState/* = SKIP
 42264692 NEXUS5X GLES : DepthStencilTestES3.FramebufferClearThenStencilTestStateThenStencilAttached/* = SKIP
@@ -1399,6 +1396,7 @@
 523128541 PIXEL10 GLES : UniformBlockWithOneLargeArrayMemberTest.TwoUniformBlocksInSameProgram/* = SKIP
 523128541 PIXEL10 GLES : UniformBufferTest.SameBufferDifferentMetalSize/* = SKIP
 562821012 PIXEL10 GLES : UniformBufferTest.DifferentRangeSizesSameOffsetAndStride/* = SKIP
+562821012 PIXEL10 GLES : UniformBufferTest.CopySubDataPartialOverwritePreservesRemainingUniformData/* = SKIP
 526503288 PIXEL10 GLES : BaseInstanceOverflowTest.BaseInstanceOverflow2/ES3_OpenGLES_AlwaysEnableEmulatedMultidrawExtensions = SKIP
 516824665 PIXEL10 GLES : Texture2DTest.InvalidFormatTypeCombosShouldFail/* = SKIP
 516824665 PIXEL10 GLES : Texture2DTest.FormatRGB10A2REVToRGB565/* = SKIP
@@ -1427,6 +1425,9 @@
 563032519 PIXEL10 GLES : Texture2DTestES3.SampleThenFullUpdateWithBaseChange/* = SKIP
 565371513 PIXEL10 GLES : Texture3DTestES3.GenMipmapThenBlend/* = SKIP
 565453056 PIXEL10 GLES : Texture3DTestES3.UploadLayerThenBlend/* = SKIP
+565453056 PIXEL10 GLES : RobustResourceInitTestES3.DrawToSliceOf3DBlendReadback/* = SKIP
+567159166 PIXEL10 GLES : GLSLTest_ES3.StructWithOnlySamplersRHSOfCommaWithSideEffect/* = SKIP
+567159166 PIXEL10 GLES : GLSLTest_ES3.StructWithOnlySamplersRHSOfCommaWithSideEffectAsFuncArg/* = SKIP
 
 480069042 PIXEL10 VULKAN : ClearTextureEXTTestES31Unrenderable.Clear/ES3_1_Vulkan*__GL_RG16_SNORM_EXT_GL_RG_GL_SHORT_GL_TEXTURE_2D_ARRAY = SKIP
 480069042 PIXEL10 VULKAN : ClearTextureEXTTestES31Unrenderable.Clear/ES3_1_Vulkan*__GL_RGB32UI_GL_RGB_INTEGER_GL_UNSIGNED_INT_GL_TEXTURE_2D_ARRAY = SKIP
@@ -1635,6 +1636,9 @@
 564547811 IOS METAL : ASTCCompressedWithBaseLevelTest.Image/* = SKIP
 564547811 IOS METAL : ASTCCompressedWithBaseLevelTest.SubImage/* = SKIP
 564569394 IOS METAL : RobustResourceInitTestES3.RGBASwizzleUndefinedMipCachedThenInitialized/* = SKIP
+567407816 IOS METAL : ASTCCompressedWithBaseLevelRobustInitTest.DrawWithoutUpload4x4/* = SKIP
+567407816 IOS METAL : ASTCCompressedWithBaseLevelRobustInitTest.DrawWithoutUpload8x5/* = SKIP
+567407816 IOS METAL : ASTCCompressedWithBaseLevelRobustInitTest.SubImage/* = SKIP
 
 // D3D11 backend does not support LOD options with shadow samplers
 365066518 D3D11 : ShadowSamplerFunctionTexture2DTest.Test/*__TextureBias_Mipmapped = SKIP
@@ -1653,6 +1657,14 @@
 365066518 D3D11 : ShadowSamplerFunctionTexture2DArrayTest.Test/*__TextureGradOffset_Mipmapped = SKIP
 365066518 D3D11 : ShadowSamplerFunctionTextureCubeTest.Test/*__TextureBias_Mipmapped = SKIP
 365066518 D3D11 : ShadowSamplerFunctionTextureCubeTest.Test/*__TextureGrad_Mipmapped = SKIP
+
+// Skipping tests while we work on enabling atomic counter buffer support in the D3D renderer.
+// Nvidia's OpenGL driver fails to compile the shader.
+42262434 NVIDIA OPENGL : AtomicCounterBufferTest31.AtomicCounterArrayOfArray/* = SKIP
+// Intel's Windows OpenGL driver crashes in this test.
+42262434 INTEL OPENGL WIN : AtomicCounterBufferTest31.AtomicCounterArrayOfArray/* = SKIP
+// Skipping due to a bug on the Adreno OpenGLES Android driver.
+42261624 ANDROID QUALCOMM GLES : AtomicCounterBufferTest31.AtomicCounterReadCompute/* = SKIP
 
 // Some drivers incorrectly apply LOD and bias options when an offset is used
 365066518 PIXEL4ORXL GLES : ShadowSamplerFunctionTexture2DTest.Test/*__TextureLodOffset_Mipmapped = SKIP
@@ -2469,8 +2481,6 @@
 42264369 ANDROID GLES : GLSLTest_ES31.ShortCircuitOutOfBoundsAccess/* = SKIP
 
 // WebGPU failures
-// Flakily causes test timeout issues on Linux/NVIDIA
-517972806 WGPU LINUX NVIDIA : * = SKIP
 // Device lock up on Mac/AMD
 538326435 WGPU MAC AMD : * = SKIP
 // BasicUniformUsage tests fail too frequently with WGPU
@@ -2910,11 +2920,6 @@
 // Pixel4's GLES driver fails new test: TransformFeedbackTest.CaptureThenUseAsUBO.
 419403192 PIXEL4ORXL GLES : TransformFeedbackTest.CaptureThenUseAsUBO/* = SKIP
 
-// Pixel4 GLES driver fails to compile the GLES1 uber shader when robustness is enabled
-516887576 PIXEL4ORXL GLES : LightsTest.DiffuseGradient/* = SKIP
-516887576 PIXEL4ORXL GLES : LightsTest.FlatLitMesh/* = SKIP
-516887576 PIXEL4ORXL GLES : LightsTest.SmoothLitMesh/* = SKIP
-
 454067880 D3D11 : GLSLTest.ComplicatedMultielementSwizzle1/* = SKIP
 
 454067880 D3D11 : GLSLTest.ComplicatedMultielementSwizzle2/* = SKIP
@@ -2945,6 +2950,9 @@
 454016926 IR : GLSLTest.FunctionArgumentEvalOrder/* = SKIP
 454016926 IR : GLSLTest.FunctionArgumentEvalOrderOverloaded/* = SKIP
 454016926 IR : GLSLTest.TernaryModifiesVariableInSameStatement/* = SKIP
+
+42267100 IR WGPU : GLSLTest.AccessChainIndexPreservedAcrossIncrement/* = SKIP
+42267100 IR WGPU : GLSLTest.AccessChainIndexPreservedAcrossInoutCall/* = SKIP
 // Untriaged failures with MSL
 349994211 IR METAL : GLSLTestLoops.ForContinueInSwitch/* = SKIP
 349994211 IR METAL : GLSLTestLoops.ForContinueInSwitchComplex/* = SKIP
@@ -3117,6 +3125,30 @@
 546640309 WIN QUALCOMM D3D11 : TransformFeedbackTest.BlitWhileRecordingDoesNotContribute/* = SKIP
 546640309 WIN QUALCOMM D3D11 : TransformFeedbackTest.CopyWhileRecordingDoesNotContribute/* = SKIP
 546640309 WIN QUALCOMM D3D11 : TransformFeedbackTest.TransformFeedbackQueryPausedDrawThenResume/* = SKIP
+
+// The setNeedInitOnInvalidation feature loses data with 3D textures
+564918838 D3D11 : RobustResourceInitTestES3.InvalidateSliceOf3DSample/* = SKIP
+564918838 D3D11 : RobustResourceInitTestES3.InvalidateSliceOf3DReadback/* = SKIP
+564918838 D3D11 : RobustResourceInitTestES3.InvalidateSliceOf3DBlendReadback/* = SKIP
+564918838 D3D11 : RobustResourceInitTestES3.InvalidateLayerOf2DArrayBlendReadback/* = SKIP
+564918838 OPENGL : RobustResourceInitTestES3.InvalidateSliceOf3DSample/* = SKIP
+564918838 OPENGL : RobustResourceInitTestES3.InvalidateSliceOf3DReadback/* = SKIP
+564918838 OPENGL : RobustResourceInitTestES3.InvalidateSliceOf3DBlendReadback/* = SKIP
+564918838 OPENGL : RobustResourceInitTestES3.InvalidateLayerOf2DArrayBlendReadback/* = SKIP
+564918838 GLES : RobustResourceInitTestES3.InvalidateSliceOf3DSample/* = SKIP
+564918838 GLES : RobustResourceInitTestES3.InvalidateSliceOf3DReadback/* = SKIP
+564918838 GLES : RobustResourceInitTestES3.InvalidateSliceOf3DBlendReadback/* = SKIP
+564918838 GLES : RobustResourceInitTestES3.InvalidateLayerOf2DArrayBlendReadback/* = SKIP
+564918838 METAL : RobustResourceInitTestES3.InvalidateSliceOf3DSample/* = SKIP
+564918838 METAL : RobustResourceInitTestES3.InvalidateSliceOf3DReadback/* = SKIP
+564918838 METAL : RobustResourceInitTestES3.InvalidateSliceOf3DBlendReadback/* = SKIP
+564918838 METAL : RobustResourceInitTestES3.InvalidateLayerOf2DArrayBlendReadback/* = SKIP
+
+566108153 WIN NVIDIA VULKAN : RobustResourceInitWithInvalidationTest.InvalidateAfterDrawAndClearZeroStencil/* = SKIP
+
+568338695 VULKAN : ClearTestES3.DrawClearInvalidateClear/* = SKIP
+568338695 ARM GLES : ClearTestES3.DrawClearInvalidateClear/* = SKIP
+568338695 PIXEL4ORXL GLES : ClearTestES3.DrawClearInvalidateClear/* = SKIP
 
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 // Slow tests, should appear last in this file

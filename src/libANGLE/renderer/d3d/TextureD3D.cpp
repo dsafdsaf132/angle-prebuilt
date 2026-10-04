@@ -107,9 +107,9 @@ TextureD3D::TextureD3D(const gl::TextureState &state, RendererD3D *renderer)
       mRenderer(renderer),
       mDirtyImages(true),
       mImmutable(false),
+      mEGLImageTarget(false),
       mTexStorage(nullptr),
-      mTexStorageObserverBinding(this, kTextureStorageObserverMessageIndex),
-      mBaseLevel(0)
+      mTexStorageObserverBinding(this, kTextureStorageObserverMessageIndex)
 {}
 
 TextureD3D::~TextureD3D()
@@ -155,7 +155,7 @@ angle::Result TextureD3D::handleCopyImageSelfCopyRedefine(
     }
 
     ImageD3D *destImage = nullptr;
-    ANGLE_TRY(getImageAndSyncFromStorage(context, destIndex, &destImage));
+    ANGLE_TRY(getImageAndSyncFromStorageIfNeeded(context, destIndex, &destImage));
 
     const gl::Box sourceBox(0, 0, 0, clippedArea.width, clippedArea.height, 1);
     ANGLE_TRY(mRenderer->copyImage(context, destImage, sourceCopy.get(), sourceBox, destOffset,
@@ -184,13 +184,18 @@ angle::Result TextureD3D::getNativeTexture(const gl::Context *context, TextureSt
     return angle::Result::Continue;
 }
 
-angle::Result TextureD3D::getImageAndSyncFromStorage(const gl::Context *context,
-                                                     const gl::ImageIndex &index,
-                                                     ImageD3D **outImage)
+angle::Result TextureD3D::getImageAndSyncFromStorageIfNeeded(const gl::Context *context,
+                                                             const gl::ImageIndex &index,
+                                                             ImageD3D **outImage)
 {
     ImageD3D *image = getImage(index);
-    if (mTexStorage && mTexStorage->isRenderTarget() && isValidIndex(index) &&
-        isImageComplete(index))
+    // Syncing from mTexStorage is needed only when mTexStorage exists/is complete and
+    // !image->isDirty(). In TextureD3D, !image->isDirty() means mTexStorage holds the latest
+    // authoritative data (e.g. from FBO rendering/clears or direct TextureStorage11::setData
+    // uploads) while the CPU staging buffer does not. Conversely, when image->isDirty() is true,
+    // the CPU staging image already holds newer uncommitted data, so we must not overwrite it from
+    // mTexStorage (and we defer flushing staging to mTexStorage until commitRegion/updateStorage).
+    if (mTexStorage && isValidIndex(index) && isImageComplete(index) && !image->isDirty())
     {
         ANGLE_TRY(image->copyFromTexStorage(context, index, mTexStorage));
         image->markClean();
@@ -199,16 +204,35 @@ angle::Result TextureD3D::getImageAndSyncFromStorage(const gl::Context *context,
     return angle::Result::Continue;
 }
 
+// For immutable textures (glTexStorage*D), all mip levels from 0 to levels-1 are fixed at creation
+// time and mTexStorage is not released when GL_TEXTURE_BASE_LEVEL changes. If storage is later
+// recreated (e.g. via ensureBindFlags to add RenderTarget bind flags) while getBaseLevel() > 0, we
+// must use mTexStorage's actual level-0 dimensions rather than extrapolating via
+// `getBaseLevel*() << getBaseLevel()`, which can produce wrong level-0 dimensions in two cases:
+// 1. A dimension already clamped to 1 at getBaseLevel() (e.g. a 16384x1 texture at baseLevel 13 has
+//    height 1, so `1 << 13` would compute 8192 instead of 1).
+// 2. Non-power-of-two dimensions where low bits were shifted out at getBaseLevel() (e.g. a 13x13
+//    texture at baseLevel 1 has width 6, so `6 << 1` would compute 12 instead of 13).
 GLint TextureD3D::getLevelZeroWidth() const
 {
+    if (isImmutable())
+    {
+        ASSERT(mTexStorage);
+        return mTexStorage->getLevelWidth(0);
+    }
     ASSERT(gl::CountLeadingZeros(static_cast<uint32_t>(getBaseLevelWidth())) > getBaseLevel());
-    return getBaseLevelWidth() << mBaseLevel;
+    return getBaseLevelWidth() << getBaseLevel();
 }
 
 GLint TextureD3D::getLevelZeroHeight() const
 {
+    if (isImmutable())
+    {
+        ASSERT(mTexStorage);
+        return mTexStorage->getLevelHeight(0);
+    }
     ASSERT(gl::CountLeadingZeros(static_cast<uint32_t>(getBaseLevelHeight())) > getBaseLevel());
-    return getBaseLevelHeight() << mBaseLevel;
+    return getBaseLevelHeight() << getBaseLevel();
 }
 
 GLint TextureD3D::getLevelZeroDepth() const
@@ -645,11 +669,12 @@ TextureStorage *TextureD3D::getStorage()
 
 ImageD3D *TextureD3D::getBaseLevelImage() const
 {
-    if (mBaseLevel >= gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS)
+    const GLuint baseLevel = getBaseLevel();
+    if (baseLevel >= gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS)
     {
         return nullptr;
     }
-    return getImage(getImageIndex(mBaseLevel, 0));
+    return getImage(getImageIndex(baseLevel, 0));
 }
 
 angle::Result TextureD3D::setImageExternal(const gl::Context *context,
@@ -690,11 +715,12 @@ angle::Result TextureD3D::generateMipmap(const gl::Context *context)
 angle::Result TextureD3D::generateMipmapUsingImages(const gl::Context *context,
                                                     const GLuint maxLevel)
 {
+    const GLuint baseLevel = getBaseLevel();
     // We know that all layers have the same dimension, for the texture to be complete
-    GLint layerCount = static_cast<GLint>(getLayerCount(mBaseLevel));
+    GLint layerCount = static_cast<GLint>(getLayerCount(baseLevel));
 
     if (mTexStorage && !mTexStorage->isRenderTarget() &&
-        canCreateRenderTargetForImage(getImageIndex(mBaseLevel, 0)) &&
+        canCreateRenderTargetForImage(getImageIndex(baseLevel, 0)) &&
         mRenderer->getRendererClass() == RENDERER_D3D11)
     {
         if (!mRenderer->getFeatures().setDataFasterThanImageUpload.enabled)
@@ -713,7 +739,7 @@ angle::Result TextureD3D::generateMipmapUsingImages(const gl::Context *context,
             // Copy from the storage mip 0 to Image mip 0
             for (GLint layer = 0; layer < layerCount; ++layer)
             {
-                gl::ImageIndex srcIndex = getImageIndex(mBaseLevel, layer);
+                gl::ImageIndex srcIndex = getImageIndex(baseLevel, layer);
 
                 ImageD3D *image = getImage(srcIndex);
                 ANGLE_TRY(image->copyFromTexStorage(context, srcIndex, mTexStorage));
@@ -733,7 +759,7 @@ angle::Result TextureD3D::generateMipmapUsingImages(const gl::Context *context,
 
     for (GLint layer = 0; layer < layerCount; ++layer)
     {
-        for (GLuint mip = mBaseLevel + 1; mip <= maxLevel; ++mip)
+        for (GLuint mip = baseLevel + 1; mip <= maxLevel; ++mip)
         {
             ASSERT(getLayerCount(mip) == layerCount);
 
@@ -851,8 +877,40 @@ bool TextureD3D::canCreateRenderTargetForImage(const gl::ImageIndex &index) cons
 
     ImageD3D *image = getImage(index);
     ASSERT(image);
-    bool levelsComplete = (isImageComplete(index) && isImageComplete(getImageIndex(0, 0)));
+    bool levelsComplete =
+        (isImageComplete(index) && isImageComplete(getImageIndex(getBaseLevel(), 0)));
     return (image->isRenderableFormat() && levelsComplete);
+}
+
+angle::Result TextureD3D::copyImageFromFramebufferToStaging(const gl::Context *context,
+                                                            const gl::ImageIndex &index,
+                                                            const gl::Offset &destOffset,
+                                                            const gl::Rectangle &clippedArea,
+                                                            gl::Framebuffer *source)
+{
+    ASSERT(!canCreateRenderTargetForImage(index));
+    // canCreateRenderTargetForImage(index) checks isRenderableFormat(), isImageComplete(index),
+    // and base-level completeness. Because all formats valid for CopyTexImage/CopyTexSubImage are
+    // renderable and isImageComplete(index) implies the base level is also complete,
+    // !canCreateRenderTargetForImage(index) means !isImageComplete(index).
+    //
+    // Since mTexStorage only stores mip-complete levels (and updateStorage() skips incomplete
+    // levels), mTexStorage never holds newer data for an incomplete index, so no sync from
+    // mTexStorage to the staging image is needed.
+    //
+    // onStateChange(DirtyBitsFlagged) is not needed here: CopyTexImage already signals
+    // SubjectChanged via signalDirtyStorage(), and for CopyTexSubImage an incomplete level cannot
+    // be uploaded to mTexStorage or sampled until a subsequent level redefinition or texture
+    // parameter change (e.g. GL_TEXTURE_BASE_LEVEL) makes it complete, which itself signals
+    // SubjectChanged.
+    ASSERT(!isImageComplete(index));
+
+    ImageD3D *image = getImage(index);
+    ASSERT(image);
+    gl::Offset stagingOffset(destOffset.x, destOffset.y, 0);
+    ANGLE_TRY(image->copyFromFramebuffer(context, stagingOffset, clippedArea, source));
+    mDirtyImages = true;
+    return angle::Result::Continue;
 }
 
 angle::Result TextureD3D::commitRegion(const gl::Context *context,
@@ -883,13 +941,18 @@ angle::Result TextureD3D::getAttachmentRenderTarget(const gl::Context *context,
 
 angle::Result TextureD3D::setBaseLevel(const gl::Context *context, GLuint baseLevel)
 {
-    mBaseLevel = baseLevel;
+    // gl::Texture::setBaseLevel updates mState before calling into the backend, so getBaseLevel()
+    // (which queries mState.getEffectiveBaseLevel()) already returns the new baseLevel.
+    ASSERT(baseLevel == getBaseLevel());
 
     // If mTexStorage has not been created yet, there is no existing storage to back up or release;
-    // when storage is later initialized, it will use the updated mBaseLevel.
+    // when storage is later initialized, it will use the updated getBaseLevel().
     // For immutable textures (created via glTexStorage*D), the storage already covers all mip
     // levels with the correct dimensions, so it should never be released on base level change.
-    if (!mTexStorage || isImmutable())
+    // For EGLImage targets, mTexStorage wraps the external EGLImage (TextureStorage11_EGLImage)
+    // and cannot be backed up to mImageArray or recreated by initializeStorage, so it must also
+    // remain intact on base level change (completeness is handled by the frontend).
+    if (!mTexStorage || isImmutable() || mEGLImageTarget)
     {
         return angle::Result::Continue;
     }
@@ -1149,7 +1212,6 @@ void TextureD3D::onSubjectStateChange(angle::SubjectIndex index, angle::SubjectM
 TextureD3D_2D::TextureD3D_2D(const gl::TextureState &state, RendererD3D *renderer)
     : TextureD3D(state, renderer)
 {
-    mEGLImageTarget = false;
     for (auto &image : mImageArray)
     {
         image.reset(renderer->createImage());
@@ -1395,9 +1457,8 @@ angle::Result TextureD3D_2D::copyImage(const gl::Context *context,
 
     if (!canCreateRenderTargetForImage(index))
     {
-        ANGLE_TRY(mImageArray[index.getLevelIndex()]->copyFromFramebuffer(context, destOffset,
-                                                                          clippedArea, source));
-        mDirtyImages = true;
+        ANGLE_TRY(
+            copyImageFromFramebufferToStaging(context, index, destOffset, clippedArea, source));
     }
     else
     {
@@ -1433,16 +1494,14 @@ angle::Result TextureD3D_2D::copySubImage(const gl::Context *context,
     const gl::Offset clippedOffset(destOffset.x + clippedArea.x - sourceArea.x,
                                    destOffset.y + clippedArea.y - sourceArea.y, 0);
 
-    // can only make our texture storage to a render target if level 0 is defined (with a width &
-    // height) and the current level we're copying to is defined (with appropriate format, width &
-    // height)
+    // can only make our texture storage to a render target if the base level is defined (with a
+    // width & height) and the current level we're copying to is defined (with appropriate format,
+    // width & height)
 
     if (!canCreateRenderTargetForImage(index))
     {
-        ANGLE_TRY(mImageArray[index.getLevelIndex()]->copyFromFramebuffer(context, clippedOffset,
-                                                                          clippedArea, source));
-        mDirtyImages = true;
-        onStateChange(angle::SubjectMessage::DirtyBitsFlagged);
+        ANGLE_TRY(
+            copyImageFromFramebufferToStaging(context, index, clippedOffset, clippedArea, source));
     }
     else
     {
@@ -1503,10 +1562,11 @@ angle::Result TextureD3D_2D::copyTexture(const gl::Context *context,
         gl::ImageIndex sourceImageIndex = gl::ImageIndex::Make2D(sourceLevel.get());
         TextureD3D *sourceD3D           = GetImplAs<TextureD3D>(source);
         ImageD3D *sourceImage           = nullptr;
-        ANGLE_TRY(sourceD3D->getImageAndSyncFromStorage(context, sourceImageIndex, &sourceImage));
+        ANGLE_TRY(
+            sourceD3D->getImageAndSyncFromStorageIfNeeded(context, sourceImageIndex, &sourceImage));
 
         ImageD3D *destImage = nullptr;
-        ANGLE_TRY(getImageAndSyncFromStorage(context, index, &destImage));
+        ANGLE_TRY(getImageAndSyncFromStorageIfNeeded(context, index, &destImage));
 
         ANGLE_TRY(mRenderer->copyImage(context, destImage, sourceImage, sourceBox, destOffset,
                                        unpackFlipY, unpackPremultiplyAlpha, unpackUnmultiplyAlpha));
@@ -1551,10 +1611,11 @@ angle::Result TextureD3D_2D::copySubTexture(const gl::Context *context,
         gl::ImageIndex sourceImageIndex = gl::ImageIndex::Make2D(sourceLevel.get());
         TextureD3D *sourceD3D           = GetImplAs<TextureD3D>(source);
         ImageD3D *sourceImage           = nullptr;
-        ANGLE_TRY(sourceD3D->getImageAndSyncFromStorage(context, sourceImageIndex, &sourceImage));
+        ANGLE_TRY(
+            sourceD3D->getImageAndSyncFromStorageIfNeeded(context, sourceImageIndex, &sourceImage));
 
         ImageD3D *destImage = nullptr;
-        ANGLE_TRY(getImageAndSyncFromStorage(context, index, &destImage));
+        ANGLE_TRY(getImageAndSyncFromStorageIfNeeded(context, index, &destImage));
 
         ANGLE_TRY(mRenderer->copyImage(context, destImage, sourceImage, sourceBox, destOffset,
                                        unpackFlipY, unpackPremultiplyAlpha, unpackUnmultiplyAlpha));
@@ -1641,6 +1702,8 @@ angle::Result TextureD3D_2D::bindTexImage(const gl::Context *context, egl::Surfa
     ASSERT(surfaceD3D);
 
     mTexStorage = mRenderer->createTextureStorage2D(surfaceD3D->getSwapChain(), mState.getLabel());
+    // Even though an EGLSurface is an external buffer, it is an EGLSurface (egl::Surface), not an
+    // EGLImage (egl::Image), so mEGLImageTarget is set to false.
     mEGLImageTarget = false;
 
     mDirtyImages = false;
@@ -2121,10 +2184,8 @@ angle::Result TextureD3D_Cube::copyImage(const gl::Context *context,
 
     if (!canCreateRenderTargetForImage(index))
     {
-        ANGLE_TRY(mImageArray[faceIndex][index.getLevelIndex()]->copyFromFramebuffer(
-            context, destOffset, clippedArea, source));
-        mDirtyImages = true;
-        onStateChange(angle::SubjectMessage::DirtyBitsFlagged);
+        ANGLE_TRY(
+            copyImageFromFramebufferToStaging(context, index, destOffset, clippedArea, source));
     }
     else
     {
@@ -2163,10 +2224,8 @@ angle::Result TextureD3D_Cube::copySubImage(const gl::Context *context,
 
     if (!canCreateRenderTargetForImage(index))
     {
-        ANGLE_TRY(mImageArray[faceIndex][index.getLevelIndex()]->copyFromFramebuffer(
-            context, clippedOffset, clippedArea, source));
-        mDirtyImages = true;
-        onStateChange(angle::SubjectMessage::DirtyBitsFlagged);
+        ANGLE_TRY(
+            copyImageFromFramebufferToStaging(context, index, clippedOffset, clippedArea, source));
     }
     else
     {
@@ -2226,10 +2285,11 @@ angle::Result TextureD3D_Cube::copyTexture(const gl::Context *context,
         gl::ImageIndex sourceImageIndex = gl::ImageIndex::Make2D(sourceLevel.get());
         TextureD3D *sourceD3D           = GetImplAs<TextureD3D>(source);
         ImageD3D *sourceImage           = nullptr;
-        ANGLE_TRY(sourceD3D->getImageAndSyncFromStorage(context, sourceImageIndex, &sourceImage));
+        ANGLE_TRY(
+            sourceD3D->getImageAndSyncFromStorageIfNeeded(context, sourceImageIndex, &sourceImage));
 
         ImageD3D *destImage = nullptr;
-        ANGLE_TRY(getImageAndSyncFromStorage(context, index, &destImage));
+        ANGLE_TRY(getImageAndSyncFromStorageIfNeeded(context, index, &destImage));
 
         ANGLE_TRY(mRenderer->copyImage(context, destImage, sourceImage, sourceBox, destOffset,
                                        unpackFlipY, unpackPremultiplyAlpha, unpackUnmultiplyAlpha));
@@ -2276,10 +2336,11 @@ angle::Result TextureD3D_Cube::copySubTexture(const gl::Context *context,
         gl::ImageIndex sourceImageIndex = gl::ImageIndex::Make2D(sourceLevel.get());
         TextureD3D *sourceD3D           = GetImplAs<TextureD3D>(source);
         ImageD3D *sourceImage           = nullptr;
-        ANGLE_TRY(sourceD3D->getImageAndSyncFromStorage(context, sourceImageIndex, &sourceImage));
+        ANGLE_TRY(
+            sourceD3D->getImageAndSyncFromStorageIfNeeded(context, sourceImageIndex, &sourceImage));
 
         ImageD3D *destImage = nullptr;
-        ANGLE_TRY(getImageAndSyncFromStorage(context, index, &destImage));
+        ANGLE_TRY(getImageAndSyncFromStorageIfNeeded(context, index, &destImage));
 
         ANGLE_TRY(mRenderer->copyImage(context, destImage, sourceImage, sourceBox, destOffset,
                                        unpackFlipY, unpackPremultiplyAlpha, unpackUnmultiplyAlpha));
@@ -2858,18 +2919,14 @@ angle::Result TextureD3D_3D::copySubImage(const gl::Context *context,
     // date before the copy and then copy back to the storage afterwards if needed.
     // TODO: Investigate 3D blits in D3D11.
 
-    bool syncTexStorage = mTexStorage && isLevelComplete(index.getLevelIndex());
-    if (syncTexStorage)
-    {
-        ANGLE_TRY(
-            mImageArray[index.getLevelIndex()]->copyFromTexStorage(context, index, mTexStorage));
-    }
-    ANGLE_TRY(mImageArray[index.getLevelIndex()]->copyFromFramebuffer(context, clippedDestOffset,
-                                                                      clippedSourceArea, source));
+    gl::ImageIndex levelIndex = gl::ImageIndex::Make3D(index.getLevelIndex());
+    ImageD3D *image           = nullptr;
+    ANGLE_TRY(getImageAndSyncFromStorageIfNeeded(context, levelIndex, &image));
+    ANGLE_TRY(image->copyFromFramebuffer(context, clippedDestOffset, clippedSourceArea, source));
     mDirtyImages = true;
     onStateChange(angle::SubjectMessage::DirtyBitsFlagged);
 
-    if (syncTexStorage)
+    if (mTexStorage && isLevelComplete(index.getLevelIndex()))
     {
         ANGLE_TRY(updateStorageLevel(context, index.getLevelIndex()));
     }
@@ -2925,8 +2982,9 @@ angle::Result TextureD3D_3D::copyTexture(const gl::Context *context,
         ImageD3D *destImage        = nullptr;
         TextureD3D *sourceD3D      = GetImplAs<TextureD3D>(source);
 
-        ANGLE_TRY(getImageAndSyncFromStorage(context, destIndex, &destImage));
-        ANGLE_TRY(sourceD3D->getImageAndSyncFromStorage(context, sourceIndex, &sourceImage));
+        ANGLE_TRY(getImageAndSyncFromStorageIfNeeded(context, destIndex, &destImage));
+        ANGLE_TRY(
+            sourceD3D->getImageAndSyncFromStorageIfNeeded(context, sourceIndex, &sourceImage));
 
         ANGLE_TRY(mRenderer->copyImage(context, destImage, sourceImage, sourceBox, destOffset,
                                        unpackFlipY, unpackPremultiplyAlpha, unpackUnmultiplyAlpha));
@@ -2972,10 +3030,11 @@ angle::Result TextureD3D_3D::copySubTexture(const gl::Context *context,
         gl::ImageIndex sourceImageIndex = gl::ImageIndex::Make3D(sourceLevel.get());
         TextureD3D *sourceD3D           = GetImplAs<TextureD3D>(source);
         ImageD3D *sourceImage           = nullptr;
-        ANGLE_TRY(sourceD3D->getImageAndSyncFromStorage(context, sourceImageIndex, &sourceImage));
+        ANGLE_TRY(
+            sourceD3D->getImageAndSyncFromStorageIfNeeded(context, sourceImageIndex, &sourceImage));
 
         ImageD3D *destImage = nullptr;
-        ANGLE_TRY(getImageAndSyncFromStorage(context, destIndex, &destImage));
+        ANGLE_TRY(getImageAndSyncFromStorageIfNeeded(context, destIndex, &destImage));
 
         ANGLE_TRY(mRenderer->copyImage(context, destImage, sourceImage, sourceBox, destOffset,
                                        unpackFlipY, unpackPremultiplyAlpha, unpackUnmultiplyAlpha));
@@ -3265,19 +3324,19 @@ void TextureD3D_3D::markAllImagesDirty()
 
 GLint TextureD3D_3D::getLevelZeroDepth() const
 {
+    // See comment in TextureD3D::getLevelZeroWidth().
+    if (isImmutable())
+    {
+        ASSERT(mTexStorage);
+        return mTexStorage->getLevelDepth(0);
+    }
     ASSERT(gl::CountLeadingZeros(static_cast<uint32_t>(getBaseLevelDepth())) > getBaseLevel());
     return getBaseLevelDepth() << getBaseLevel();
 }
 
 TextureD3D_2DArray::TextureD3D_2DArray(const gl::TextureState &state, RendererD3D *renderer)
     : TextureD3D(state, renderer)
-{
-    for (int level = 0; level < gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS; ++level)
-    {
-        ANGLE_UNSAFE_TODO(mLayerCounts[level]) = 0;
-        ANGLE_UNSAFE_TODO(mImageArray[level])  = nullptr;
-    }
-}
+{}
 
 void TextureD3D_2DArray::onDestroy(const gl::Context *context)
 {
@@ -3293,52 +3352,47 @@ TextureD3D_2DArray::~TextureD3D_2DArray() {}
 ImageD3D *TextureD3D_2DArray::getImage(int level, int layer) const
 {
     ASSERT(level < gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS);
-    ANGLE_UNSAFE_TODO(
-        ASSERT((layer == 0 && mLayerCounts[level] == 0) || layer < mLayerCounts[level]));
-    return ANGLE_UNSAFE_TODO(mImageArray[level] ? mImageArray[level][layer] : nullptr);
+    ASSERT((layer == 0 && mLayerCounts[level] == 0) || layer < mLayerCounts[level]);
+    return !mImageArray[level].empty() ? mImageArray[level][layer] : nullptr;
 }
 
 ImageD3D *TextureD3D_2DArray::getImage(const gl::ImageIndex &index) const
 {
     ASSERT(index.getLevelIndex() < gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS);
     ASSERT(index.hasLayer());
-    ANGLE_UNSAFE_TODO(
-        ASSERT((index.getLayerIndex() == 0 && mLayerCounts[index.getLevelIndex()] == 0) ||
-               index.getLayerIndex() < mLayerCounts[index.getLevelIndex()]));
+    ASSERT((index.getLayerIndex() == 0 && mLayerCounts[index.getLevelIndex()] == 0) ||
+           index.getLayerIndex() < mLayerCounts[index.getLevelIndex()]);
     ASSERT(index.getType() == gl::TextureType::_2DArray);
-    return ANGLE_UNSAFE_TODO(mImageArray[index.getLevelIndex()]
-                                 ? mImageArray[index.getLevelIndex()][index.getLayerIndex()]
-                                 : nullptr);
+    return !mImageArray[index.getLevelIndex()].empty()
+               ? mImageArray[index.getLevelIndex()][index.getLayerIndex()]
+               : nullptr;
 }
 
 GLsizei TextureD3D_2DArray::getLayerCount(int level) const
 {
     ASSERT(level < gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS);
-    return ANGLE_UNSAFE_TODO(mLayerCounts[level]);
+    return mLayerCounts[level];
 }
 
 GLsizei TextureD3D_2DArray::getWidth(GLint level) const
 {
-    return ANGLE_UNSAFE_TODO(
-        (level < gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS && mLayerCounts[level] > 0)
-            ? mImageArray[level][0]->getWidth()
-            : 0);
+    return (level < gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS && mLayerCounts[level] > 0)
+               ? mImageArray[level][0]->getWidth()
+               : 0;
 }
 
 GLsizei TextureD3D_2DArray::getHeight(GLint level) const
 {
-    return ANGLE_UNSAFE_TODO(
-        (level < gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS && mLayerCounts[level] > 0)
-            ? mImageArray[level][0]->getHeight()
-            : 0);
+    return (level < gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS && mLayerCounts[level] > 0)
+               ? mImageArray[level][0]->getHeight()
+               : 0;
 }
 
 GLenum TextureD3D_2DArray::getInternalFormat(GLint level) const
 {
-    return ANGLE_UNSAFE_TODO(
-        (level < gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS && mLayerCounts[level] > 0)
-            ? mImageArray[level][0]->getInternalFormat()
-            : GL_NONE);
+    return (level < gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS && mLayerCounts[level] > 0)
+               ? mImageArray[level][0]->getInternalFormat()
+               : GL_NONE;
 }
 
 bool TextureD3D_2DArray::isDepth(GLint level) const
@@ -3526,11 +3580,8 @@ angle::Result TextureD3D_2DArray::copySubImage(const gl::Context *context,
 
     if (!canCreateRenderTargetForImage(index))
     {
-        gl::Offset destLayerOffset(clippedDestOffset.x, clippedDestOffset.y, 0);
-        ANGLE_TRY(ANGLE_UNSAFE_TODO(mImageArray[index.getLevelIndex()][clippedDestOffset.z])
-                      ->copyFromFramebuffer(context, destLayerOffset, clippedSourceArea, source));
-        mDirtyImages = true;
-        onStateChange(angle::SubjectMessage::DirtyBitsFlagged);
+        ANGLE_TRY(copyImageFromFramebufferToStaging(context, index, clippedDestOffset,
+                                                    clippedSourceArea, source));
     }
     else
     {
@@ -3604,9 +3655,10 @@ angle::Result TextureD3D_2DArray::copyTexture(const gl::Context *context,
             ImageD3D *destImage   = nullptr;
             TextureD3D *sourceD3D = GetImplAs<TextureD3D>(source);
 
-            ANGLE_TRY(getImageAndSyncFromStorage(context, currentDestDepthIndex, &destImage));
-            ANGLE_TRY(sourceD3D->getImageAndSyncFromStorage(context, currentSourceDepthIndex,
-                                                            &sourceImage));
+            ANGLE_TRY(
+                getImageAndSyncFromStorageIfNeeded(context, currentDestDepthIndex, &destImage));
+            ANGLE_TRY(sourceD3D->getImageAndSyncFromStorageIfNeeded(
+                context, currentSourceDepthIndex, &sourceImage));
             gl::Box imageBox(sourceBox.x, sourceBox.y, 0, sourceBox.width, sourceBox.height, 1);
             ANGLE_TRY(mRenderer->copyImage(context, destImage, sourceImage, imageBox, destOffset,
                                            unpackFlipY, unpackPremultiplyAlpha,
@@ -3666,11 +3718,11 @@ angle::Result TextureD3D_2DArray::copySubTexture(const gl::Context *context,
 
             TextureD3D *sourceD3D = GetImplAs<TextureD3D>(source);
             ImageD3D *sourceImage = nullptr;
-            ANGLE_TRY(
-                sourceD3D->getImageAndSyncFromStorage(context, currentSourceIndex, &sourceImage));
+            ANGLE_TRY(sourceD3D->getImageAndSyncFromStorageIfNeeded(context, currentSourceIndex,
+                                                                    &sourceImage));
 
             ImageD3D *destImage = nullptr;
-            ANGLE_TRY(getImageAndSyncFromStorage(context, currentDestIndex, &destImage));
+            ANGLE_TRY(getImageAndSyncFromStorageIfNeeded(context, currentDestIndex, &destImage));
 
             ANGLE_TRY(mRenderer->copyImage(context, destImage, sourceImage, currentLayerBox,
                                            destOffset, unpackFlipY, unpackPremultiplyAlpha,
@@ -3702,20 +3754,18 @@ angle::Result TextureD3D_2DArray::setStorage(const gl::Context *context,
         gl::Extents levelLayerSize(std::max(1, size.width >> level),
                                    std::max(1, size.height >> level), 1);
 
-        ANGLE_UNSAFE_TODO(mLayerCounts[level]) = (level < levels ? size.depth : 0);
+        mLayerCounts[level] = (level < levels ? size.depth : 0);
 
-        if (ANGLE_UNSAFE_TODO(mLayerCounts[level]) > 0)
+        if (mLayerCounts[level] > 0)
         {
             // Create new images for this level
-            ANGLE_UNSAFE_TODO(mImageArray[level] = new ImageD3D *[mLayerCounts[level]]);
+            mImageArray[level].resize(mLayerCounts[level]);
 
-            for (int layer = 0; layer < ANGLE_UNSAFE_TODO(mLayerCounts[level]); layer++)
+            for (int layer = 0; layer < mLayerCounts[level]; layer++)
             {
-                ANGLE_UNSAFE_TODO({
-                    mImageArray[level][layer] = mRenderer->createImage();
-                    mImageArray[level][layer]->redefine(gl::TextureType::_2DArray, internalFormat,
-                                                        levelLayerSize, true);
-                })
+                mImageArray[level][layer] = mRenderer->createImage();
+                mImageArray[level][layer]->redefine(gl::TextureType::_2DArray, internalFormat,
+                                                    levelLayerSize, true);
             }
         }
     }
@@ -3922,11 +3972,10 @@ angle::Result TextureD3D_2DArray::updateStorageLevel(const gl::Context *context,
     ASSERT(level >= 0 && level < static_cast<int>(ArraySize(mLayerCounts)));
     ASSERT(isLevelComplete(level));
 
-    for (int layer = 0; layer < ANGLE_UNSAFE_TODO(mLayerCounts[level]); layer++)
+    for (int layer = 0; layer < mLayerCounts[level]; layer++)
     {
-        ANGLE_UNSAFE_TODO(
-            ASSERT(mImageArray[level] != nullptr && mImageArray[level][layer] != nullptr));
-        if (ANGLE_UNSAFE_TODO(mImageArray[level][layer]->isDirty()))
+        ASSERT(!mImageArray[level].empty() && mImageArray[level][layer] != nullptr);
+        if (mImageArray[level][layer]->isDirty())
         {
             gl::ImageIndex index = gl::ImageIndex::Make2DArray(level, layer);
             gl::Box region(0, 0, 0, getWidth(level), getHeight(level), 1);
@@ -3951,15 +4000,12 @@ void TextureD3D_2DArray::deleteImages()
 {
     for (int level = 0; level < gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS; ++level)
     {
-        for (int layer = 0; layer < ANGLE_UNSAFE_TODO(mLayerCounts[level]); ++layer)
+        for (int layer = 0; layer < mLayerCounts[level]; ++layer)
         {
-            ANGLE_UNSAFE_TODO(delete mImageArray[level][layer]);
+            delete mImageArray[level][layer];
         }
-        ANGLE_UNSAFE_TODO({
-            delete[] mImageArray[level];
-            mImageArray[level]  = nullptr;
-            mLayerCounts[level] = 0;
-        })
+        mImageArray[level].clear();
+        mLayerCounts[level] = 0;
     }
 }
 
@@ -3970,23 +4016,21 @@ angle::Result TextureD3D_2DArray::redefineImage(const gl::Context *context,
                                                 bool forceRelease)
 {
     // Only reallocate the layers if the size doesn't match
-    if (size.depth != ANGLE_UNSAFE_TODO(mLayerCounts[level]))
+    if (size.depth != mLayerCounts[level])
     {
-        for (int layer = 0; layer < ANGLE_UNSAFE_TODO(mLayerCounts[level]); layer++)
+        for (int layer = 0; layer < mLayerCounts[level]; layer++)
         {
-            ANGLE_UNSAFE_TODO(SafeDelete(mImageArray[level][layer]));
+            SafeDelete(mImageArray[level][layer]);
         }
-        ANGLE_UNSAFE_TODO({
-            SafeDeleteArray(mImageArray[level]);
-            mLayerCounts[level] = size.depth;
-        })
+        mImageArray[level].clear();
+        mLayerCounts[level] = size.depth;
 
         if (size.depth > 0)
         {
-            ANGLE_UNSAFE_TODO(mImageArray[level] = new ImageD3D *[size.depth]);
-            for (int layer = 0; layer < ANGLE_UNSAFE_TODO(mLayerCounts[level]); layer++)
+            mImageArray[level].resize(size.depth);
+            for (int layer = 0; layer < mLayerCounts[level]; layer++)
             {
-                ANGLE_UNSAFE_TODO(mImageArray[level][layer] = mRenderer->createImage());
+                mImageArray[level][layer] = mRenderer->createImage();
             }
         }
     }
@@ -3996,12 +4040,12 @@ angle::Result TextureD3D_2DArray::redefineImage(const gl::Context *context,
 
     if (size.depth > 0)
     {
-        for (int layer = 0; layer < ANGLE_UNSAFE_TODO(mLayerCounts[level]); layer++)
+        for (int layer = 0; layer < mLayerCounts[level]; layer++)
         {
-            ANGLE_UNSAFE_TODO(mImageArray[level][layer])
-                ->redefine(gl::TextureType::_2DArray, internalformat,
-                           gl::Extents(size.width, size.height, 1), forceRelease);
-            mDirtyImages = mDirtyImages || ANGLE_UNSAFE_TODO(mImageArray[level][layer])->isDirty();
+            mImageArray[level][layer]->redefine(gl::TextureType::_2DArray, internalformat,
+                                                gl::Extents(size.width, size.height, 1),
+                                                forceRelease);
+            mDirtyImages = mDirtyImages || mImageArray[level][layer]->isDirty();
         }
     }
 
@@ -4010,7 +4054,8 @@ angle::Result TextureD3D_2DArray::redefineImage(const gl::Context *context,
 
 gl::ImageIndexIterator TextureD3D_2DArray::imageIterator() const
 {
-    return gl::ImageIndexIterator::Make2DArray(0, mTexStorage->getLevelCount(), mLayerCounts);
+    return gl::ImageIndexIterator::Make2DArray(0, mTexStorage->getLevelCount(),
+                                               mLayerCounts.data());
 }
 
 gl::ImageIndex TextureD3D_2DArray::getImageIndex(GLint mip, GLint layer) const
@@ -4033,19 +4078,17 @@ bool TextureD3D_2DArray::isValidIndex(const gl::ImageIndex &index) const
     }
 
     // Check the layer index
-    return ANGLE_UNSAFE_TODO(!index.hasLayer() ||
-                             (index.getLayerIndex() >= 0 &&
-                              index.getLayerIndex() < mLayerCounts[index.getLevelIndex()]));
+    return !index.hasLayer() || (index.getLayerIndex() >= 0 &&
+                                 index.getLayerIndex() < mLayerCounts[index.getLevelIndex()]);
 }
 
 void TextureD3D_2DArray::markAllImagesDirty()
 {
     for (int dirtyLevel = 0; dirtyLevel < gl::IMPLEMENTATION_MAX_TEXTURE_LEVELS; dirtyLevel++)
     {
-        for (int dirtyLayer = 0; dirtyLayer < ANGLE_UNSAFE_TODO(mLayerCounts[dirtyLevel]);
-             dirtyLayer++)
+        for (int dirtyLayer = 0; dirtyLayer < mLayerCounts[dirtyLevel]; dirtyLayer++)
         {
-            ANGLE_UNSAFE_TODO(mImageArray[dirtyLevel][dirtyLayer]->markDirty());
+            mImageArray[dirtyLevel][dirtyLayer]->markDirty();
         }
     }
     mDirtyImages = true;
@@ -4172,6 +4215,9 @@ angle::Result TextureD3D_External::setImageExternal(const gl::Context *context,
     {
         mTexStorage = mRenderer->createTextureStorageExternal(stream, desc, mState.getLabel());
     }
+    // An EGLStream (egl::Stream) is not an EGLImage (egl::Image), so mEGLImageTarget is set to
+    // false.
+    mEGLImageTarget = false;
 
     return angle::Result::Continue;
 }
@@ -4189,6 +4235,7 @@ angle::Result TextureD3D_External::setEGLImageTarget(const gl::Context *context,
     ANGLE_TRY(releaseTexStorage(context, gl::TexLevelMask()));
     mTexStorage =
         mRenderer->createTextureStorageEGLImage(eglImaged3d, renderTargetD3D, mState.getLabel());
+    mEGLImageTarget = true;
 
     return angle::Result::Continue;
 }

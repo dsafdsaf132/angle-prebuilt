@@ -881,7 +881,7 @@ const TConstantUnion *TIntermAggregate::getConstantValue() const
         // http://crbug.com/498400132
         angle::base::CheckedNumeric<size_t> checkedArraySize = elementSize;
         checkedArraySize *= getOutermostArraySize();
-        constArray = new TConstantUnion[checkedArraySize.ValueOrDie()];
+        constArray = new TConstantUnion[static_cast<size_t>(checkedArraySize.ValueOrDie())];
 
         size_t elementOffset = 0u;
         for (TIntermNode *constructorArg : mArguments)
@@ -3025,7 +3025,7 @@ TConstantUnion *TIntermConstantUnion::foldUnaryNonComponentWise(TOperator op)
         {
             ASSERT(getType().getBasicType() == EbtUInt);
             resultArray = new TConstantUnion[4];
-            float f[4];
+            std::array<float, 4> f;
             gl::UnpackUnorm4x8(operandArray[0].getUConst(), f);
             for (size_t i = 0; i < 4; ++i)
             {
@@ -3037,7 +3037,7 @@ TConstantUnion *TIntermConstantUnion::foldUnaryNonComponentWise(TOperator op)
         {
             ASSERT(getType().getBasicType() == EbtUInt);
             resultArray = new TConstantUnion[4];
-            float f[4];
+            std::array<float, 4> f;
             gl::UnpackSnorm4x8(operandArray[0].getUConst(), f);
             for (size_t i = 0; i < 4; ++i)
             {

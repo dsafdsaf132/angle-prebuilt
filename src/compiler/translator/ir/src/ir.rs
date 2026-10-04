@@ -1536,11 +1536,26 @@ impl Name {
         Name { name, suffix: None, source: NameSource::ShaderInterface }
     }
     // A name that must be preserved exactly in the output, for example `main`, or ANGLE internal
-    // interface variables.
+    // interface variables.  Avoid prefixes that can be added to user symbols, so that there cannot
+    // be collisions between them.
+    fn verify_no_user_prefix(name: &'static str) {
+        debug_assert!(!name.starts_with(USER_VARIABLE_PREFIX));
+        debug_assert!(!name.starts_with(USER_BLOCK_PREFIX));
+        debug_assert!(!name.starts_with(TEMP_VARIABLE_PREFIX));
+        debug_assert!(!name.starts_with(TEMP_FUNCTION_PREFIX));
+        debug_assert!(!name.starts_with(TEMP_STRUCT_PREFIX));
+    }
     pub fn new_exact(name: &'static str) -> Name {
+        Self::verify_no_user_prefix(name);
+        Name { name, suffix: None, source: NameSource::Internal }
+    }
+    pub fn new_exact_struct_field(name: &'static str) -> Name {
+        // Same as new_exact(), but without a prefix check.  A struct field can have any name (for
+        // example the `far` field of `gl_DepthRangeParameters`)
         Name { name, suffix: None, source: NameSource::Internal }
     }
     pub fn new_exact_with_suffix(name: &'static str, suffix: u32) -> Name {
+        Self::verify_no_user_prefix(name);
         Name { name, suffix: Some(suffix), source: NameSource::Internal }
     }
 }
@@ -2229,6 +2244,9 @@ impl Type {
     }
     pub fn is_pixel_local_storage_plane(&self) -> bool {
         matches!(self, Type::Image(_, ImageType { dimension: ImageDimension::PixelLocal, .. }))
+    }
+    pub fn is_opaque(&self) -> bool {
+        matches!(self, Type::Image(..) | Type::Scalar(BasicType::AtomicCounter))
     }
 
     pub fn is_array(&self) -> bool {
@@ -3586,14 +3604,10 @@ impl IR {
         IR { meta: IRMeta::new(shader_type), function_entries: Vec::with_capacity(20) }
     }
 
-    pub fn add_function(&mut self, function: Function) -> FunctionId {
-        let new_id = self.meta.add_function(function);
-        debug_assert!(new_id.id as usize == self.function_entries.len());
-        self.function_entries.push(None);
-        new_id
-    }
-
     pub fn set_function_entry(&mut self, id: FunctionId, entry: Block) {
+        if id.id as usize >= self.function_entries.len() {
+            self.function_entries.resize_with(id.id as usize + 1, || None);
+        }
         debug_assert!(self.function_entries[id.id as usize].is_none());
         self.function_entries[id.id as usize] = Some(entry);
     }
