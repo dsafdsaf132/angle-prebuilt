@@ -594,11 +594,11 @@ jobs:
               jobs=12
             fi
             echo "Windows ARM64 ninja jobs: $jobs (processors: $processor_count)"
-            autoninja -C out/Release -j "$jobs" libEGL libGLESv2 copy_compiler_dll
+            autoninja -C out/Release -j "$jobs" libEGL libGLESv2 copy_compiler_dll swiftshader_libvulkan icd_file
           elif [[ "${{ matrix.platform }}" == "win32" ]]; then
-            autoninja -C out/Release libEGL libGLESv2 copy_compiler_dll
+            autoninja -C out/Release libEGL libGLESv2 copy_compiler_dll swiftshader_libvulkan icd_file
           else
-            autoninja -C out/Release libEGL libGLESv2
+            autoninja -C out/Release libEGL libGLESv2 swiftshader_libvulkan icd_file
           fi
           echo "Build output file list:"
           python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" list-outputs --build-dir out/Release

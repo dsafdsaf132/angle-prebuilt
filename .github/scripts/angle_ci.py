@@ -56,9 +56,11 @@ COMMON_GN_ARGS = {
     "angle_enable_cl": False,
     "angle_enable_null": False,
     "angle_enable_renderdoc": False,
-    "angle_enable_swiftshader": False,
+    "angle_enable_swiftshader": True,
     "angle_enable_trace": False,
-    "angle_enable_vulkan": False,
+    "angle_enable_vulkan": True,
+    # Keep the Vulkan loader inside ANGLE so archives need no system loader.
+    "angle_shared_libvulkan": False,
     "angle_enable_vulkan_api_dump_layer": False,
     "angle_enable_vulkan_validation_layers": False,
     "angle_enable_wgpu": False,
@@ -124,11 +126,26 @@ SMOKE_SOURCE = r"""
 #include <GLES3/gl3.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 static void fail(const char *message)
 {
     std::fprintf(stderr, "%s (EGL error 0x%04x)\n", message, eglGetError());
     std::exit(1);
+}
+
+static EGLDisplay getSwiftShaderDisplay()
+{
+    const EGLint attribs[] = {
+        EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE,
+        EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_DEVICE_TYPE_SWIFTSHADER_ANGLE,
+#if defined(__linux__)
+        EGL_PLATFORM_ANGLE_NATIVE_PLATFORM_TYPE_ANGLE, EGL_PLATFORM_SURFACELESS_MESA,
+#endif
+        EGL_NONE,
+    };
+    return eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE,
+                                    reinterpret_cast<void *>(EGL_DEFAULT_DISPLAY), attribs);
 }
 
 static EGLDisplay getAnglePlatformDisplay()
@@ -160,12 +177,17 @@ static EGLDisplay getAnglePlatformDisplay()
 
 int main()
 {
-    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    const bool software = std::getenv("ANGLE_SMOKE_SWIFTSHADER") != nullptr;
+    EGLDisplay display = software ? getSwiftShaderDisplay() : eglGetDisplay(EGL_DEFAULT_DISPLAY);
 
     EGLint major = 0;
     EGLint minor = 0;
     if (display == EGL_NO_DISPLAY || !eglInitialize(display, &major, &minor))
     {
+        if (software)
+        {
+            fail("SwiftShader eglInitialize failed");
+        }
         display = getAnglePlatformDisplay();
         if (display == EGL_NO_DISPLAY)
         {
@@ -231,6 +253,12 @@ int main()
         fail("glGetString(GL_VERSION) failed");
     }
     std::printf("GL_VERSION=%s\n", reinterpret_cast<const char *>(version));
+    const char *renderer = reinterpret_cast<const char *>(glGetString(GL_RENDERER));
+    std::printf("GL_RENDERER=%s\n", renderer ? renderer : "unknown");
+    if (software && (!renderer || !std::strstr(renderer, "SwiftShader")))
+    {
+        fail("Software smoke did not select SwiftShader");
+    }
 
     glViewport(0, 0, 16, 16);
     glClearColor(0.0f, 0.25f, 0.5f, 1.0f);
@@ -238,6 +266,14 @@ int main()
     if (glGetError() != GL_NO_ERROR)
     {
         fail("glClear failed");
+    }
+
+    unsigned char pixel[4] = {};
+    glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    if (glGetError() != GL_NO_ERROR || pixel[0] != 0 ||
+        pixel[1] < 63 || pixel[1] > 65 || pixel[2] < 127 || pixel[2] > 129 || pixel[3] != 255)
+    {
+        fail("Clear/readback pixel mismatch");
     }
 
     eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -823,6 +859,22 @@ def maybe_copy(src, dst):
     return False
 
 
+def swiftshader_library(target_platform):
+    return {
+        "linux": "libvk_swiftshader.so",
+        "darwin": "libvk_swiftshader.dylib",
+        "win32": "vk_swiftshader.dll",
+    }[target_platform]
+
+
+def has_swiftshader(metadata):
+    gn_args = metadata["gnArgs"]
+    if metadata.get("arch") == "universal":
+        return all(gn_args.get(arch, {}).get("angle_enable_swiftshader", False)
+                   for arch in ("x64", "arm64"))
+    return gn_args.get("angle_enable_swiftshader", False)
+
+
 def copy_build_outputs(source_root, build_dir, package_root, target_platform):
     out_dst = package_root / RELEASE_DIR
     out_dst.mkdir(parents=True, exist_ok=True)
@@ -838,7 +890,6 @@ def copy_build_outputs(source_root, build_dir, package_root, target_platform):
     elif target_platform == "darwin":
         for name in ("libEGL.dylib", "libGLESv2.dylib"):
             copy_one(build_dir / name, out_dst / name)
-        fix_macos_install_names(out_dst)
     elif target_platform == "win32":
         for name in ("libEGL.dll", "libGLESv2.dll"):
             copy_one(build_dir / name, out_dst / name)
@@ -866,6 +917,13 @@ def copy_build_outputs(source_root, build_dir, package_root, target_platform):
     else:
         raise ValueError(f"Unsupported platform: {target_platform}")
 
+    # SwiftShader is loaded at runtime and must accompany the EGL/GLES libraries.
+    name = swiftshader_library(target_platform)
+    copy_one(build_dir / name, out_dst / name)
+    copy_one(build_dir / "vk_swiftshader_icd.json", out_dst / "vk_swiftshader_icd.json")
+    if target_platform == "darwin":
+        fix_macos_install_names(out_dst)
+
 
 def find_d3dcompiler(build_dir):
     names = ("d3dcompiler_47.dll", "D3DCompiler_47.dll")
@@ -880,8 +938,10 @@ def fix_macos_install_names(out_dir):
     if sys.platform != "darwin":
         return
 
-    for name in ("libEGL.dylib", "libGLESv2.dylib"):
+    for name in ("libEGL.dylib", "libGLESv2.dylib", "libvk_swiftshader.dylib"):
         lib = out_dir / name
+        if not lib.exists():
+            continue
         run(["install_name_tool", "-id", f"@rpath/{name}", str(lib)])
 
     egl = out_dir / "libEGL.dylib"
@@ -978,6 +1038,8 @@ def create_package(args):
         copy_header_dirs(source_root, package_root)
         copy_build_outputs(source_root, build_dir, package_root, args.platform)
         copy_one(source_root / "LICENSE", package_root / "angle" / "LICENSE")
+        copy_one(source_root / "third_party" / "SwiftShader" / "LICENSE.txt",
+                 package_root / "angle" / "SWIFTSHADER_LICENSE.txt")
         write_build_json(package_root, args, gn_args)
 
         name = archive_name(version, args.platform, args.arch)
@@ -1048,11 +1110,24 @@ def validate_layout(extract_root, target_platform):
         if key not in metadata:
             raise KeyError(f"angle-build.json is missing {key}")
 
+    if has_swiftshader(metadata):
+        for relative_path in (
+            RELEASE_DIR.relative_to("angle") / swiftshader_library(target_platform),
+            RELEASE_DIR.relative_to("angle") / "vk_swiftshader_icd.json",
+            Path("SWIFTSHADER_LICENSE.txt"),
+        ):
+            if not (angle_root / relative_path).is_file():
+                raise FileNotFoundError(f"Missing SwiftShader runtime file: {relative_path}")
+
 
 def check_dependencies(extract_root, target_platform, source_root=None, arch=None):
     out_dir = Path(extract_root) / RELEASE_DIR
+    software = has_swiftshader(load_json(Path(extract_root) / "angle" / "angle-build.json"))
+    libraries = [name for name in required_libraries(target_platform) if not name.endswith(".lib")]
+    if software:
+        libraries.append(swiftshader_library(target_platform))
     if target_platform == "linux":
-        for name in ("libEGL.so", "libGLESv2.so"):
+        for name in libraries:
             lib = out_dir / name
             if shutil.which("ldd"):
                 output = run_output(["ldd", str(lib)])
@@ -1061,10 +1136,10 @@ def check_dependencies(extract_root, target_platform, source_root=None, arch=Non
             if "not found" in output:
                 raise RuntimeError(f"Missing dynamic dependency for {lib}")
     elif target_platform == "darwin":
-        for name in ("libEGL.dylib", "libGLESv2.dylib"):
+        for name in libraries:
             run(["otool", "-L", str(out_dir / name)])
     elif target_platform == "win32":
-        for name in ("libEGL.dll", "libGLESv2.dll"):
+        for name in libraries:
             lib = out_dir / name
             imports = read_pe_imports(lib)
             print(f"{name} imports:")
@@ -1191,6 +1266,14 @@ def compile_and_run_smoke(extract_root, target_platform, arch):
             env["ANGLE_SMOKE_ALLOW_NO_DISPLAY"] = "1"
         run([str(exe)], env=env)
 
+    metadata = load_json(extract_root / "angle" / "angle-build.json")
+    if has_swiftshader(metadata):
+        env["ANGLE_SMOKE_SWIFTSHADER"] = "1"
+        env.pop("ANGLE_SMOKE_ALLOW_NO_DISPLAY", None)
+        env.pop("DISPLAY", None)
+        env.pop("WAYLAND_DISPLAY", None)
+        run([str(exe)], env=env)
+
 
 def prepend_env_path(current, value):
     if not current:
@@ -1223,7 +1306,14 @@ def run_windows_smoke(smoke_cpp, include_dir, lib_dir, arch):
     batch_lines.extend([
         f'set "PATH={lib_dir};%PATH%"',
         f'"{exe}"',
+        "if errorlevel 1 exit /b %errorlevel%",
     ])
+    if has_swiftshader(load_json(lib_dir.parent.parent / "angle-build.json")):
+        batch_lines.extend([
+            'set "ANGLE_SMOKE_SWIFTSHADER=1"',
+            f'"{exe}"',
+            "if errorlevel 1 exit /b %errorlevel%",
+        ])
     batch.write_text("\r\n".join(batch_lines) + "\r\n", encoding="utf-8")
     run(["cmd", "/d", "/c", str(batch)])
 
@@ -1313,7 +1403,14 @@ def create_universal(args):
         shutil.copytree(x64_root / "angle", stage_root / "angle")
 
         out_dir = stage_root / RELEASE_DIR
-        for name in ("libEGL.dylib", "libGLESv2.dylib"):
+        x64_meta = load_json(x64_root / "angle" / "angle-build.json")
+        arm64_meta = load_json(arm64_root / "angle" / "angle-build.json")
+        if has_swiftshader(x64_meta) != has_swiftshader(arm64_meta):
+            raise RuntimeError("macOS slices disagree on SwiftShader support")
+        libraries = list(required_libraries("darwin"))
+        if has_swiftshader(x64_meta):
+            libraries.append(swiftshader_library("darwin"))
+        for name in libraries:
             run(
                 [
                     "lipo",
@@ -1327,9 +1424,6 @@ def create_universal(args):
             run(["lipo", "-info", str(out_dir / name)])
 
         fix_macos_install_names(out_dir)
-
-        x64_meta = load_json(x64_root / "angle" / "angle-build.json")
-        arm64_meta = load_json(arm64_root / "angle" / "angle-build.json")
         metadata = {
             "angleRef": x64_meta.get("angleRef", arm64_meta.get("angleRef")),
             "angleCommit": x64_meta.get("angleCommit", arm64_meta.get("angleCommit")),
@@ -1506,6 +1600,7 @@ def self_test(args):
         imports = read_pe_imports(pe_path)
         if imports != ["KERNEL32.dll"]:
             raise AssertionError(f"Unexpected PE imports: {imports!r}")
+        test_swiftshader_packaging(Path(temp) / "swiftshader")
         artifact_root = Path(temp) / "release-assets"
         create_minimal_release_archives(artifact_root)
         github_output = Path(temp) / "github-output"
@@ -1521,6 +1616,31 @@ def self_test(args):
         ):
             raise AssertionError("Release asset commit output is incorrect")
         print("self-test ok")
+
+
+def test_swiftshader_packaging(test_root):
+    for platform in PLATFORM_GN_ARGS:
+        build_dir = test_root / platform / "build"
+        build_dir.mkdir(parents=True)
+        runtime_files = (swiftshader_library(platform), "vk_swiftshader_icd.json")
+        for name in (*required_libraries(platform), *runtime_files):
+            (build_dir / name).write_text("test\n", encoding="utf-8")
+        package_root = test_root / platform / "package"
+        copy_build_outputs(test_root, build_dir, package_root, platform)
+        for name in runtime_files:
+            if (package_root / RELEASE_DIR / name).read_text() != "test\n":
+                raise AssertionError(f"SwiftShader runtime was not packaged: {name}")
+        # Missing runtime files must fail packaging instead of producing a broken archive.
+        (build_dir / runtime_files[0]).unlink()
+        try:
+            copy_build_outputs(test_root, build_dir, package_root, platform)
+        except FileNotFoundError:
+            pass
+        else:
+            raise AssertionError("Packaging accepted a missing SwiftShader library")
+
+    if has_swiftshader({"arch": "universal", "gnArgs": {}}):
+        raise AssertionError("Legacy universal archive falsely requires SwiftShader")
 
 
 def create_test_windows_sdk(sdk_root, sdk_version, arch):
@@ -1675,6 +1795,9 @@ def create_minimal_release_archives(artifact_root):
             out_dir.mkdir(parents=True, exist_ok=True)
             for name in required_libraries(platform):
                 (out_dir / name).write_text("test\n", encoding="utf-8")
+            for name in (swiftshader_library(platform), "vk_swiftshader_icd.json"):
+                (out_dir / name).write_text("test\n", encoding="utf-8")
+            (angle_root / "SWIFTSHADER_LICENSE.txt").write_text("test\n", encoding="utf-8")
             (angle_root / "LICENSE").write_text("test\n", encoding="utf-8")
             (angle_root / "angle-build.json").write_text(
                 json.dumps(
@@ -1686,7 +1809,10 @@ def create_minimal_release_archives(artifact_root):
                         "buildType": "Release",
                         "shared": True,
                         "generatedAt": "2026-01-01T00:00:00Z",
-                        "gnArgs": {},
+                        "gnArgs": (
+                            {cpu: {"angle_enable_swiftshader": True} for cpu in ("x64", "arm64")}
+                            if arch == "universal" else {"angle_enable_swiftshader": True}
+                        ),
                     },
                     indent=2,
                     sort_keys=True,

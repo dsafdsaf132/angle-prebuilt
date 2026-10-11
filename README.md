@@ -30,6 +30,21 @@ Archive filenames use the first 7 characters of the upstream SHA.
 [smoke-passed]: https://img.shields.io/badge/Smoke-passed-brightgreen
 [smoke-skipped]: https://img.shields.io/badge/Smoke-skipped-lightgrey
 
+## Software Rendering
+
+Builds include the Vulkan backend and SwiftShader for CPU rendering. Existing
+OpenGL, Metal, and Direct3D backends remain available. The Vulkan loader is
+linked into ANGLE; no system Vulkan loader is required.
+
+To select SwiftShader, pass `EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE` as
+`EGL_PLATFORM_ANGLE_TYPE_ANGLE` and
+`EGL_PLATFORM_ANGLE_DEVICE_TYPE_SWIFTSHADER_ANGLE` as
+`EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE` to `eglGetPlatformDisplayEXT`. Keep the
+SwiftShader library and `vk_swiftshader_icd.json` beside the ANGLE libraries.
+On Linux, also set `EGL_PLATFORM_ANGLE_NATIVE_PLATFORM_TYPE_ANGLE` to
+`EGL_PLATFORM_SURFACELESS_MESA` for rendering without an X display.
+CI checks SwiftShader clear/readback separately from the existing backend smoke.
+
 ## Archive Layout
 
 ```text
@@ -44,8 +59,11 @@ angle/
     Release/
       libEGL.*
       libGLESv2.*
+      *vk_swiftshader.*
+      vk_swiftshader_icd.json
       platform-specific import/runtime files
   LICENSE
+  SWIFTSHADER_LICENSE.txt
   angle-build.json
 ```
 
