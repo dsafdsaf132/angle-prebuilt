@@ -34,7 +34,8 @@ Archive filenames use the first 7 characters of the upstream SHA.
 
 Builds include the Vulkan backend and SwiftShader for CPU rendering. Existing
 OpenGL, Metal, and Direct3D backends remain available. The Vulkan loader is
-linked into ANGLE; no system Vulkan loader is required.
+linked into ANGLE on Linux/macOS and bundled as `vulkan-1.dll` on Windows;
+no system Vulkan loader is required.
 
 To select SwiftShader, pass `EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE` as
 `EGL_PLATFORM_ANGLE_TYPE_ANGLE` and
@@ -64,6 +65,7 @@ angle/
       platform-specific import/runtime files
   LICENSE
   SWIFTSHADER_LICENSE.txt
+  VULKAN_LOADER_LICENSE.txt (Windows)
   angle-build.json
 ```
 

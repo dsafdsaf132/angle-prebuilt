@@ -59,7 +59,7 @@ COMMON_GN_ARGS = {
     "angle_enable_swiftshader": True,
     "angle_enable_trace": False,
     "angle_enable_vulkan": True,
-    # Keep the Vulkan loader inside ANGLE so archives need no system loader.
+    # Linux/macOS can link the Vulkan loader into ANGLE.
     "angle_shared_libvulkan": False,
     "angle_enable_vulkan_api_dump_layer": False,
     "angle_enable_vulkan_validation_layers": False,
@@ -105,6 +105,8 @@ PLATFORM_GN_ARGS = {
     },
     "win32": {
         "target_os": "win",
+        # The Windows loader defines DllMain, which conflicts with libGLESv2.
+        "angle_shared_libvulkan": True,
         "angle_enable_d3d9": False,
         "angle_enable_d3d11": True,
         "angle_enable_d3d11_compositor_native_window": False,
@@ -917,6 +919,9 @@ def copy_build_outputs(source_root, build_dir, package_root, target_platform):
     else:
         raise ValueError(f"Unsupported platform: {target_platform}")
 
+    if target_platform == "win32":
+        copy_one(build_dir / "vulkan-1.dll", out_dst / "vulkan-1.dll")
+
     # SwiftShader is loaded at runtime and must accompany the EGL/GLES libraries.
     name = swiftshader_library(target_platform)
     copy_one(build_dir / name, out_dst / name)
@@ -1040,6 +1045,9 @@ def create_package(args):
         copy_one(source_root / "LICENSE", package_root / "angle" / "LICENSE")
         copy_one(source_root / "third_party" / "SwiftShader" / "LICENSE.txt",
                  package_root / "angle" / "SWIFTSHADER_LICENSE.txt")
+        if args.platform == "win32":
+            copy_one(source_root / "third_party" / "vulkan-loader" / "src" / "LICENSE.txt",
+                     package_root / "angle" / "VULKAN_LOADER_LICENSE.txt")
         write_build_json(package_root, args, gn_args)
 
         name = archive_name(version, args.platform, args.arch)
@@ -1119,13 +1127,22 @@ def validate_layout(extract_root, target_platform):
             if not (angle_root / relative_path).is_file():
                 raise FileNotFoundError(f"Missing SwiftShader runtime file: {relative_path}")
 
+    if target_platform == "win32" and metadata["gnArgs"].get("angle_shared_libvulkan", False):
+        for path in (angle_root / "out" / "Release" / "vulkan-1.dll",
+                     angle_root / "VULKAN_LOADER_LICENSE.txt"):
+            if not path.is_file():
+                raise FileNotFoundError(f"Missing Vulkan loader file: {path}")
+
 
 def check_dependencies(extract_root, target_platform, source_root=None, arch=None):
     out_dir = Path(extract_root) / RELEASE_DIR
-    software = has_swiftshader(load_json(Path(extract_root) / "angle" / "angle-build.json"))
+    metadata = load_json(Path(extract_root) / "angle" / "angle-build.json")
+    software = has_swiftshader(metadata)
     libraries = [name for name in required_libraries(target_platform) if not name.endswith(".lib")]
     if software:
         libraries.append(swiftshader_library(target_platform))
+    if target_platform == "win32" and metadata["gnArgs"].get("angle_shared_libvulkan", False):
+        libraries.append("vulkan-1.dll")
     if target_platform == "linux":
         for name in libraries:
             lib = out_dir / name
@@ -1623,6 +1640,8 @@ def test_swiftshader_packaging(test_root):
         build_dir = test_root / platform / "build"
         build_dir.mkdir(parents=True)
         runtime_files = (swiftshader_library(platform), "vk_swiftshader_icd.json")
+        if platform == "win32":
+            runtime_files += ("vulkan-1.dll",)
         for name in (*required_libraries(platform), *runtime_files):
             (build_dir / name).write_text("test\n", encoding="utf-8")
         package_root = test_root / platform / "package"
@@ -1631,13 +1650,15 @@ def test_swiftshader_packaging(test_root):
             if (package_root / RELEASE_DIR / name).read_text() != "test\n":
                 raise AssertionError(f"SwiftShader runtime was not packaged: {name}")
         # Missing runtime files must fail packaging instead of producing a broken archive.
-        (build_dir / runtime_files[0]).unlink()
-        try:
-            copy_build_outputs(test_root, build_dir, package_root, platform)
-        except FileNotFoundError:
-            pass
-        else:
-            raise AssertionError("Packaging accepted a missing SwiftShader library")
+        for name in runtime_files:
+            (build_dir / name).unlink()
+            try:
+                copy_build_outputs(test_root, build_dir, package_root, platform)
+            except FileNotFoundError:
+                pass
+            else:
+                raise AssertionError(f"Packaging accepted a missing runtime: {name}")
+            (build_dir / name).write_text("test\n", encoding="utf-8")
 
     if has_swiftshader({"arch": "universal", "gnArgs": {}}):
         raise AssertionError("Legacy universal archive falsely requires SwiftShader")
@@ -1797,6 +1818,9 @@ def create_minimal_release_archives(artifact_root):
                 (out_dir / name).write_text("test\n", encoding="utf-8")
             for name in (swiftshader_library(platform), "vk_swiftshader_icd.json"):
                 (out_dir / name).write_text("test\n", encoding="utf-8")
+            if platform == "win32":
+                (out_dir / "vulkan-1.dll").write_text("test\n", encoding="utf-8")
+                (angle_root / "VULKAN_LOADER_LICENSE.txt").write_text("test\n", encoding="utf-8")
             (angle_root / "SWIFTSHADER_LICENSE.txt").write_text("test\n", encoding="utf-8")
             (angle_root / "LICENSE").write_text("test\n", encoding="utf-8")
             (angle_root / "angle-build.json").write_text(
@@ -1811,7 +1835,10 @@ def create_minimal_release_archives(artifact_root):
                         "generatedAt": "2026-01-01T00:00:00Z",
                         "gnArgs": (
                             {cpu: {"angle_enable_swiftshader": True} for cpu in ("x64", "arm64")}
-                            if arch == "universal" else {"angle_enable_swiftshader": True}
+                            if arch == "universal" else {
+                                "angle_enable_swiftshader": True,
+                                "angle_shared_libvulkan": platform == "win32",
+                            }
                         ),
                     },
                     indent=2,
