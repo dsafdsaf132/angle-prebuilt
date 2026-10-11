@@ -1327,6 +1327,7 @@
 480069042 PIXEL10 GLES : Texture2DTestES3.DrawWithLevelZeroUndefined/* = SKIP
 480069042 PIXEL10 GLES : Texture2DTestES3.DrawWithLevelsOutsideRangeUndefined/* = SKIP
 480069042 PIXEL10 GLES : Texture2DTestES3.MipmapIncompleteMipmappingDisabled/* = SKIP
+480069042 PIXEL10 GLES : Texture2DTestES3.TexImageUnpackRowLengthSmallerThanWidthAndSubRectPBO/* = SKIP
 480069042 PIXEL10 GLES : Texture2DTestES3.TextureFormatChangesWithBaseLevel/* = SKIP
 480069042 PIXEL10 GLES : Texture2DTestES3.UnpackOverlappingRowsFromUnpackBuffer/* = SKIP
 480069042 PIXEL10 GLES : Texture3DTestES2.CopySubImageAlpha/* = SKIP
@@ -2558,7 +2559,6 @@
 42266907 WGPU : DebugMarkerTest.Rendering/* = SKIP
 42266907 WGPU : DepthStencilFormatsTest.DepthBuffer16/* = SKIP
 42266907 WGPU : DepthStencilTest.StencilOnlyEmulatedWithPacked/* = SKIP
-42266907 WGPU : DepthStencilTestES3.ReadOnlyDepthStencilThenOutputDepthStencil/* = SKIP
 42266907 WGPU : FramebufferFormatsTest.RGB565Renderbuffer/* = SKIP
 42266907 WGPU : FramebufferFormatsTest.RGB8AndRGBA8Renderbuffers/* = SKIP
 42266907 WGPU : FramebufferFormatsTest.RGB8Renderbuffer/* = SKIP
@@ -2738,7 +2738,6 @@
 42266907 WGPU : WebGLCompatibilityTest.BuiltInInvariant/* = SKIP
 42266907 WGPU : WebGLCompatibilityTest.StencilTestDisabledAllowsDifferentStencilMaskAndRef/* = SKIP
 42266907 WGPU : WebGLCompatibilityTest.StencilTestEnabledDisallowsDifferentStencilMaskAndRef/* = SKIP
-42266907 WGPU : WebGLFramebufferTest.TestAttachments/* = SKIP
 42266907 WGPU : WebGLFramebufferTest.TestFramebufferRequiredCombinations/* = SKIP
 42266907 WGPU : WebGLReadOutsideFramebufferTest.CopyTexSubImage2D/* = SKIP
 42266907 WGPU : WebGLReadOutsideFramebufferTest.CopyTexImage2D/* = SKIP
@@ -3029,6 +3028,7 @@
 
 // Unimplemented parts.
 515493666 D3D11 : Restart/DrawElementsVariantsTest.Draw/* = SKIP
+565475913 D3D11 : ProvokingVertexTest.FlatIndexedDrawWithOffset/* = SKIP
 
 529867799 METAL : ReadPixelsPBOTest.PackLargeRowLength/* = SKIP
 529867799 VULKAN : ReadPixelsPBOTest.PackLargeRowLength/* = SKIP
@@ -3125,6 +3125,7 @@
 546640309 WIN QUALCOMM D3D11 : TransformFeedbackTest.BlitWhileRecordingDoesNotContribute/* = SKIP
 546640309 WIN QUALCOMM D3D11 : TransformFeedbackTest.CopyWhileRecordingDoesNotContribute/* = SKIP
 546640309 WIN QUALCOMM D3D11 : TransformFeedbackTest.TransformFeedbackQueryPausedDrawThenResume/* = SKIP
+569910766 WIN QUALCOMM D3D11 : RobustResourceInitWithInvalidationTest.InvalidateAfterDrawAndClearZeroDepth/* = SKIP
 
 // The setNeedInitOnInvalidation feature loses data with 3D textures
 564918838 D3D11 : RobustResourceInitTestES3.InvalidateSliceOf3DSample/* = SKIP
@@ -3149,6 +3150,11 @@
 568338695 VULKAN : ClearTestES3.DrawClearInvalidateClear/* = SKIP
 568338695 ARM GLES : ClearTestES3.DrawClearInvalidateClear/* = SKIP
 568338695 PIXEL4ORXL GLES : ClearTestES3.DrawClearInvalidateClear/* = SKIP
+
+// Detaching depth while stencil remains attached on a packed depth-stencil buffer does not update
+// Vulkan pipeline depth/stencil state when FramebufferDesc is unchanged.
+568687942 VULKAN : FramebufferTest_ES3.DetachDepthWhileStencilRemainsAttached/* = SKIP
+568687942 PIXEL4ORXL GLES : FramebufferTest_ES3.DetachDepthWhileStencilRemainsAttached/* = SKIP
 
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 // Slow tests, should appear last in this file

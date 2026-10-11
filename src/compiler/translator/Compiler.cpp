@@ -311,9 +311,12 @@ SamplersStaticallyUsedWithTexelFetch PreprocessSamplersStaticallyUsedWithTexelFe
         SelectedFields *fields = &result[access.uniform];
         for (uint32_t fieldIndex : access.fields)
         {
-            // operator[] inserts a new empty element in subfields, which is what makes this
-            // algorithm work.
-            fields = &fields->subfields[fieldIndex];
+            auto [it, inserted] = fields->subfields.try_emplace(fieldIndex, nullptr);
+            if (inserted)
+            {
+                it->second = new SelectedFields();
+            }
+            fields = it->second;
         }
     }
 
@@ -1063,14 +1066,6 @@ bool TCompiler::checkAndSimplifyAST(TIntermBlock *root,
         }
     }
 
-    if (compileOptions.avoidComplexExpressionsInStructConstructor)
-    {
-        if (!WrapStructConstructors(this, root, &mSymbolTable))
-        {
-            return false;
-        }
-    }
-
     if (compileOptions.clampIndirectArrayBounds)
     {
         if (!ClampIndirectIndices(this, root, &mSymbolTable, mExtensionBehavior))
@@ -1151,6 +1146,15 @@ bool TCompiler::checkAndSimplifyAST(TIntermBlock *root,
 
         if (!InitializeUninitializedLocals(this, root, getShaderVersion(), canUseLoopsToInitialize,
                                            &getSymbolTable()))
+        {
+            return false;
+        }
+    }
+
+    if (compileOptions.avoidComplexExpressionsInStructConstructor)
+    {
+        // Must run after InitializeUninitializedLocals, as that would introduce struct constructors
+        if (!WrapStructConstructors(this, root, &mSymbolTable))
         {
             return false;
         }
