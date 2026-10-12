@@ -293,6 +293,15 @@ jobs:
       GYP_MSVS_VERSION: "2022"
       LINUX_ARM64_LLVM_VERSION: "23"
       ANGLE_RELEASE_MANIFEST: ${{ needs.preflight.outputs.manifest }}
+      # Dev is read-only locally and remotely, including manual dev builds.
+      SCCACHE_CACHE_SIZE: "2G"
+      # Direct/preprocessor cache has an independent LRU budget. Disable it
+      # so the 2 GiB pilot budget applies to one object-cache store.
+      SCCACHE_DIRECT: "false"
+      SCCACHE_GHA_ENABLED: "false"
+      SCCACHE_LOCAL_RW_MODE: ${{ fromJSON(needs.preflight.outputs.manifest).channel == 'stable' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'READ_WRITE' || 'READ_ONLY' }}
+      SCCACHE_BASEDIRS: ${{ github.workspace }}/angle
+      SCCACHE_IDLE_TIMEOUT: "0"
 
     steps:
       - name: Check out workflow repository
@@ -572,6 +581,42 @@ jobs:
           python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" prepare-windows-swiftshader \
             --source-root "$PWD"
 
+      - name: Configure Windows ARM64 compiler cache directory
+        if: matrix.target == 'windows-arm64'
+        shell: bash
+        run: echo "SCCACHE_DIR=$(cygpath -m "$RUNNER_TEMP/sccache")" >> "$GITHUB_ENV"
+
+      - name: Restore Windows ARM64 compiler cache
+        if: matrix.target == 'windows-arm64'
+        id: restore_sccache
+        continue-on-error: true
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: sccache-v1-win32-arm64-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: sccache-v1-win32-arm64-
+
+      - name: Install sccache for Windows ARM64
+        if: matrix.target == 'windows-arm64'
+        id: setup_sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.18.0
+          disable_annotations: true
+
+      - name: Start Windows ARM64 compiler cache
+        if: matrix.target == 'windows-arm64'
+        id: start_sccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$SCCACHE_DIR"
+          # Chromium's Windows environment wrapper replaces PATH.
+          echo "ANGLE_CC_WRAPPER=$(cygpath -m "$SCCACHE_PATH.exe")" >> "$GITHUB_ENV"
+          sccache --start-server
+          sccache --zero-stats
+          echo "Compiler cache mode: $SCCACHE_LOCAL_RW_MODE"
+
       - name: Generate GN args
         shell: bash
         working-directory: angle
@@ -581,10 +626,12 @@ jobs:
             --platform "${{ matrix.platform }}" \
             --arch "${{ matrix.arch }}" \
             --clang-version "$LINUX_ARM64_LLVM_VERSION" \
+            --cc-wrapper "${ANGLE_CC_WRAPPER:-}" \
             --output out/Release/args.gn \
             --json-output "$RUNNER_TEMP/gn-args.json"
 
       - name: Build ANGLE shared libraries
+        id: compile_angle
         shell: bash
         working-directory: angle
         run: |
@@ -611,6 +658,33 @@ jobs:
           fi
           echo "Build output file list:"
           python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" list-outputs --build-dir out/Release
+
+      - name: Report and stop Windows ARM64 compiler cache
+        if: always() && matrix.target == 'windows-arm64' && steps.start_sccache.outcome == 'success'
+        id: sccache_stats
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          sccache --show-stats | tee "$RUNNER_TEMP/sccache-stats.txt"
+          {
+            echo '### Windows ARM64 compiler cache'
+            echo "Mode: $SCCACHE_LOCAL_RW_MODE; restored snapshot: $RESTORED_CACHE_KEY"
+            echo '```text'
+            cat "$RUNNER_TEMP/sccache-stats.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          sccache --stop-server
+        env:
+          RESTORED_CACHE_KEY: ${{ steps.restore_sccache.outputs.cache-matched-key || 'none' }}
+
+      - name: Save stable Windows ARM64 compiler cache
+        if: success() && matrix.target == 'windows-arm64' && env.SCCACHE_LOCAL_RW_MODE == 'READ_WRITE' && steps.compile_angle.outcome == 'success' && steps.sccache_stats.outcome == 'success'
+        continue-on-error: true
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: sccache-v1-win32-arm64-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Package archive
         shell: bash
@@ -685,6 +759,30 @@ jobs:
           name: angle-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/artifacts/*
           if-no-files-found: error
+
+  prune-compiler-cache:
+    name: Retain two stable compiler cache snapshots
+    needs: [preflight, build]
+    if: >-
+      always() && needs.preflight.outputs.should_build == '1' &&
+      needs.build.result != 'cancelled' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      fromJSON(needs.preflight.outputs.manifest).channel == 'stable'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/scripts
+      - name: Prune only this pilot's main-branch snapshots
+        continue-on-error: true
+        run: python3 .github/scripts/sccache_cache.py prune
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANGLE_CACHE_CHANNEL: ${{ fromJSON(needs.preflight.outputs.manifest).channel }}
 
   macos_universal:
     name: macos-universal

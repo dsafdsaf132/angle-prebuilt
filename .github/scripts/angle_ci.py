@@ -322,6 +322,16 @@ def format_gn_value(value):
 def write_gn_args(args):
     gn_args = dict(COMMON_GN_ARGS)
     gn_args.update(PLATFORM_GN_ARGS[args.platform])
+    cc_wrapper = getattr(args, "cc_wrapper", "")
+    if cc_wrapper:
+        if args.platform != "win32" or args.arch != "arm64":
+            raise ValueError("Compiler cache pilot is limited to Windows ARM64")
+        if '"' in cc_wrapper or "\n" in cc_wrapper or "\r" in cc_wrapper:
+            raise ValueError("Invalid compiler wrapper path")
+        gn_args["cc_wrapper"] = f'"{cc_wrapper}"'
+        # Keep the initial external-wrapper pilot on Ninja for predictable
+        # execution; leave Siso settings unchanged on all other targets.
+        gn_args["use_siso"] = False
     if args.platform == "linux" and args.arch == "arm64":
         clang_version = args.clang_version
         if not re.fullmatch(r"[0-9]+", clang_version):
@@ -1946,6 +1956,7 @@ def main():
     gn.add_argument("--output", required=True)
     gn.add_argument("--json-output")
     gn.add_argument("--clang-version", default=DEFAULT_LINUX_ARM64_LLVM_VERSION)
+    gn.add_argument("--cc-wrapper", default="")
     gn.set_defaults(func=write_gn_args)
 
     windows_toolchain = subparsers.add_parser("prepare-windows-toolchain")

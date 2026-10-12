@@ -53,6 +53,26 @@ is applied only in the build checkout; upstream source files are not changed in
 this repository. Unexpected upstream definitions fail the build instead of being
 patched blindly.
 
+## Compiler Cache Pilot
+
+Windows ARM64 uses sccache 0.18.0 with Ninja. The local cache lives in
+`RUNNER_TEMP/sccache`, with a 2 GiB object-cache budget. Direct/preprocessor
+caching is disabled to avoid a separate LRU budget. GitHub Actions Cache stores snapshots
+under `sccache-v1-win32-arm64-{run_id}-{run_attempt}`; builds restore the newest
+matching snapshot without partitioning by source commit or release channel.
+
+Only main-branch stable builds triggered by schedule or manual dispatch write
+the cache. Dev builds use local read-only mode and never save or delete shared
+snapshots; cache misses still compile normally. Consequently, dev cannot warm
+an empty cache. A separate stable-only retention job keeps the newest two main
+snapshots, leaving other caches untouched. Cache restore/save/cleanup failures
+do not fail releases. GitHub's repository quota and inactivity eviction still
+apply. Build summaries report cache mode, restored key, hits, misses, and size.
+
+The pilot needs a cold stable build followed by a warm stable build to measure
+actual speedup. Other targets are unchanged; compiler caching does not skip
+linking, packaging, or smoke tests.
+
 ## Archive Layout
 
 ```text
