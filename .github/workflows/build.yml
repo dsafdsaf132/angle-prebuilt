@@ -563,6 +563,15 @@ jobs:
             --source-root "$PWD" \
             --arch "${{ matrix.arch }}"
 
+      - name: Prepare Windows SwiftShader ICD path
+        if: matrix.platform == 'win32'
+        shell: bash
+        working-directory: angle
+        run: |
+          set -euo pipefail
+          python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" prepare-windows-swiftshader \
+            --source-root "$PWD"
+
       - name: Generate GN args
         shell: bash
         working-directory: angle

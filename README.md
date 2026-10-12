@@ -46,6 +46,13 @@ On Linux, also set `EGL_PLATFORM_ANGLE_NATIVE_PLATFORM_TYPE_ANGLE` to
 `EGL_PLATFORM_SURFACELESS_MESA` for rendering without an X display.
 CI checks SwiftShader clear/readback separately from the existing backend smoke.
 
+Before Windows builds, the CI helper patches the checked-out ANGLE build definition
+to use the SwiftShader ICD basename without a leading `.\` component. This keeps
+ICD lookup compatible with extended-length DLL paths used by Node.js. The patch
+is applied only in the build checkout; upstream source files are not changed in
+this repository. Unexpected upstream definitions fail the build instead of being
+patched blindly.
+
 ## Archive Layout
 
 ```text

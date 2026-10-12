@@ -1607,11 +1607,68 @@ def parse_release_asset_name(name):
     raise RuntimeError(f"Unexpected release archive name: {name}")
 
 
+def prepare_windows_swiftshader(args):
+    path = Path(args.source_root) / "src/common/vulkan/BUILD.gn"
+    text = path.read_text(encoding="utf-8")
+    # Node loads DLLs through extended-length paths (\\\\?\\). These paths do
+    # not normalize '.' components, so the ICD basename must stand alone.
+    pattern = r'(if \(is_win\) \{\s*\n\s*_sws_icd = ")([^"\n]*)(")'
+    matches = list(re.finditer(pattern, text))
+    if len(matches) != 1:
+        raise RuntimeError("Unexpected Windows SwiftShader ICD definition; refusing unsafe patch")
+    match = matches[0]
+    basename = "$swiftshader_icd_file_name"
+    if match.group(2) == basename:
+        print("Windows SwiftShader ICD path is already compatible")
+        return
+    expected = "." + "\\" * 4 + basename
+    if match.group(2) != expected:
+        raise RuntimeError("Unexpected Windows SwiftShader ICD path; refusing unsafe patch")
+    patched = text[:match.start(2)] + basename + text[match.end(2):]
+    path.write_text(patched, encoding="utf-8")
+    print("Patched Windows SwiftShader ICD path for extended-length DLL paths")
+
+
+def test_windows_swiftshader_patch(test_root):
+    path = test_root / "src/common/vulkan/BUILD.gn"
+    path.parent.mkdir(parents=True)
+    basename = "$swiftshader_icd_file_name"
+    windows_path = "." + "\\" * 4 + basename
+    original = (
+        f'  _sws_icd = "./{basename}"\n'
+        '  if (is_win) {\n'
+        f'    _sws_icd = "{windows_path}"\n'
+        '  } else if (is_fuchsia) {\n'
+        f'    _sws_icd = "/pkg/{basename}"\n'
+        '  }\n'
+    )
+    args = argparse.Namespace(source_root=str(test_root))
+    path.write_text(original, encoding="utf-8")
+    prepare_windows_swiftshader(args)
+    expected = original.replace(windows_path, basename)
+    if path.read_text(encoding="utf-8") != expected:
+        raise AssertionError("SwiftShader patch changed non-Windows definitions")
+    prepare_windows_swiftshader(args)
+    if path.read_text(encoding="utf-8") != expected:
+        raise AssertionError("SwiftShader patch is not idempotent")
+    for invalid in ("", original * 2, original.replace(windows_path, "unknown.json")):
+        path.write_text(invalid, encoding="utf-8")
+        try:
+            prepare_windows_swiftshader(args)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("SwiftShader patch accepted an unexpected source layout")
+        if path.read_text(encoding="utf-8") != invalid:
+            raise AssertionError("Rejected SwiftShader patch modified the source")
+
+
 def self_test(args):
     with tempfile.TemporaryDirectory() as temp:
         test_windows_sdk_layout(Path(temp) / "windows-sdk-layout")
         test_windows_sdk_installer_resolution()
         test_exact_windows_toolchain(Path(temp) / "windows-toolchain")
+        test_windows_swiftshader_patch(Path(temp) / "windows-swiftshader")
         pe_path = Path(temp) / "minimal-arm64.dll"
         pe_path.write_bytes(create_minimal_pe(import_name="KERNEL32.dll"))
         imports = read_pe_imports(pe_path)
@@ -1896,6 +1953,10 @@ def main():
     windows_toolchain.add_argument("--sdk-root")
     windows_toolchain.add_argument("--arch", choices=("x64", "arm64"), required=True)
     windows_toolchain.set_defaults(func=prepare_windows_toolchain)
+
+    windows_swiftshader = subparsers.add_parser("prepare-windows-swiftshader")
+    windows_swiftshader.add_argument("--source-root", required=True)
+    windows_swiftshader.set_defaults(func=prepare_windows_swiftshader)
 
     windows_sdk = subparsers.add_parser("install-windows-sdk")
     windows_sdk.add_argument("--source-root", required=True)
