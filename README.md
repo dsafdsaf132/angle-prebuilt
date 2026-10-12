@@ -30,29 +30,6 @@ Archive filenames use the first 7 characters of the upstream SHA.
 [smoke-passed]: https://img.shields.io/badge/Smoke-passed-brightgreen
 [smoke-skipped]: https://img.shields.io/badge/Smoke-skipped-lightgrey
 
-## Software Rendering
-
-Builds include the Vulkan backend and SwiftShader for CPU rendering. Existing
-OpenGL, Metal, and Direct3D backends remain available. The Vulkan loader is
-linked into ANGLE on Linux/macOS and bundled as `vulkan-1.dll` on Windows;
-no system Vulkan loader is required.
-
-To select SwiftShader, pass `EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE` as
-`EGL_PLATFORM_ANGLE_TYPE_ANGLE` and
-`EGL_PLATFORM_ANGLE_DEVICE_TYPE_SWIFTSHADER_ANGLE` as
-`EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE` to `eglGetPlatformDisplayEXT`. Keep the
-SwiftShader library and `vk_swiftshader_icd.json` beside the ANGLE libraries.
-On Linux, also set `EGL_PLATFORM_ANGLE_NATIVE_PLATFORM_TYPE_ANGLE` to
-`EGL_PLATFORM_SURFACELESS_MESA` for rendering without an X display.
-CI checks SwiftShader clear/readback separately from the existing backend smoke.
-
-Before Windows builds, the CI helper patches the checked-out ANGLE build definition
-to use the SwiftShader ICD basename without a leading `.\` component. This keeps
-ICD lookup compatible with extended-length DLL paths used by Node.js. The patch
-is applied only in the build checkout; upstream source files are not changed in
-this repository. Unexpected upstream definitions fail the build instead of being
-patched blindly.
-
 ## Compiler Cache Pilot
 
 Windows ARM64 uses sccache 0.18.0 with Ninja. The local cache lives in
@@ -87,11 +64,8 @@ angle/
     Release/
       libEGL.*
       libGLESv2.*
-      *vk_swiftshader.*
-      vk_swiftshader_icd.json
       platform-specific import/runtime files
   LICENSE
-  SWIFTSHADER_LICENSE.txt
   VULKAN_LOADER_LICENSE.txt (Windows)
   angle-build.json
 ```

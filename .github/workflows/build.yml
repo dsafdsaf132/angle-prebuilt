@@ -551,6 +551,14 @@ jobs:
             sleep $((attempt * 30))
           done
 
+      - name: Prepare SwiftShader JIT memory policy
+        shell: bash
+        working-directory: angle
+        run: |
+          set -euo pipefail
+          python3 "$ANGLE_CI_SCRIPTS/angle_ci.py" prepare-swiftshader \
+            --source-root "$PWD"
+
       - name: Install upstream Windows SDK
         if: matrix.platform == 'win32'
         shell: bash

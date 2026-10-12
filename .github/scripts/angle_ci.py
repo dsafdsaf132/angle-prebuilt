@@ -57,6 +57,8 @@ COMMON_GN_ARGS = {
     "angle_enable_null": False,
     "angle_enable_renderdoc": False,
     "angle_enable_swiftshader": True,
+    # Anonymous JIT pages avoid executable-memfd restrictions in Termux/proot.
+    "swiftshader_use_named_mmap": False,
     "angle_enable_trace": False,
     "angle_enable_vulkan": True,
     # Linux/macOS can link the Vulkan loader into ANGLE.
@@ -134,6 +136,65 @@ static void fail(const char *message)
 {
     std::fprintf(stderr, "%s (EGL error 0x%04x)\n", message, eglGetError());
     std::exit(1);
+}
+
+static GLuint compileSmokeShader(GLenum type, const char *source)
+{
+    GLuint shader = glCreateShader(type);
+    glShaderSource(shader, 1, &source, nullptr);
+    glCompileShader(shader);
+    GLint compiled = GL_FALSE;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+    if (compiled != GL_TRUE)
+    {
+        char log[1024] = {};
+        glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
+        std::fprintf(stderr, "%s\n", log);
+        fail("Smoke shader compilation failed");
+    }
+    return shader;
+}
+
+static void checkShaderRendering()
+{
+    const char *vertexSource =
+        "#version 300 es\n"
+        "const vec2 p[3] = vec2[3](vec2(-1,-1), vec2(3,-1), vec2(-1,3));\n"
+        "void main() { gl_Position = vec4(p[gl_VertexID], 0, 1); }\n";
+    const char *fragmentSource =
+        "#version 300 es\n"
+        "precision mediump float;\n"
+        "out vec4 color;\n"
+        "void main() { color = vec4(0, 1, 0, 1); }\n";
+    GLuint vertex = compileSmokeShader(GL_VERTEX_SHADER, vertexSource);
+    GLuint fragment = compileSmokeShader(GL_FRAGMENT_SHADER, fragmentSource);
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vertex);
+    glAttachShader(program, fragment);
+    glLinkProgram(program);
+    GLint linked = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (linked != GL_TRUE)
+    {
+        char log[1024] = {};
+        glGetProgramInfoLog(program, sizeof(log), nullptr, log);
+        std::fprintf(stderr, "%s\n", log);
+        fail("Smoke shader link failed");
+    }
+    glUseProgram(program);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    unsigned char pixel[4] = {};
+    glReadPixels(8, 8, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    if (glGetError() != GL_NO_ERROR || pixel[0] != 0 || pixel[1] != 255 ||
+        pixel[2] != 0 || pixel[3] != 255)
+    {
+        fail("Shader draw/readback pixel mismatch");
+    }
+    glUseProgram(0);
+    glDeleteProgram(program);
+    glDeleteShader(vertex);
+    glDeleteShader(fragment);
+    std::printf("Shader draw/readback passed\n");
 }
 
 static EGLDisplay getSwiftShaderDisplay()
@@ -278,6 +339,11 @@ int main()
         fail("Clear/readback pixel mismatch");
     }
 
+    if (software)
+    {
+        checkShaderRendering();
+    }
+
     eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     eglDestroySurface(display, surface);
     eglDestroyContext(display, context);
@@ -317,6 +383,67 @@ def format_gn_value(value):
     if isinstance(value, str):
         return json.dumps(value)
     raise TypeError(f"Unsupported GN value: {value!r}")
+
+
+SWIFTSHADER_REACTOR_CONFIG = '''config("swiftshader_reactor_base_private_config") {
+  defines = [ "REACTOR_ANONYMOUS_MMAP_NAME=swiftshader_jit" ]
+}'''
+
+SWIFTSHADER_REACTOR_CONFIG_PATCHED = '''declare_args() {
+  # Named mappings aid profiling, but executable memfd pages may be forbidden
+  # by the host (for example Android with Termux/proot).
+  swiftshader_use_named_mmap = true
+}
+
+config("swiftshader_reactor_base_private_config") {
+  defines = []
+  if (swiftshader_use_named_mmap) {
+    defines += [ "REACTOR_ANONYMOUS_MMAP_NAME=swiftshader_jit" ]
+  }
+}'''
+
+SWIFTSHADER_MEMORY_REPLACEMENTS = {
+    "#elif defined(__Fuchsia__)\n\tzx_handle_t vmo;":
+    "#elif defined(__linux__)\n"
+    "\t// Without named mappings, use private anonymous pages for JIT code.\n"
+    "\tmapping = mmap(nullptr, length, permissionsToMmapProt(permissions),\n"
+    "\t               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);\n"
+    "\tif(mapping == MAP_FAILED)\n"
+    "\t{\n"
+    "\t\tmapping = nullptr;\n"
+    "\t}\n"
+    "#elif defined(__Fuchsia__)\n\tzx_handle_t vmo;",
+    "#elif defined(__APPLE__) || (defined(__linux__) && defined(REACTOR_ANONYMOUS_MMAP_NAME))":
+    "#elif defined(__APPLE__) || defined(__linux__)",
+}
+
+
+def replace_swiftshader_source(text, original, patched, path):
+    if text.count(patched) == 1:
+        if text.count(original) != patched.count(original):
+            raise RuntimeError(f"Mixed SwiftShader source versions in {path}")
+        return text
+    if text.count(original) != 1:
+        raise RuntimeError(f"Unexpected SwiftShader source in {path}")
+    return text.replace(original, patched)
+
+
+def prepare_swiftshader(args):
+    root = Path(args.source_root) / "third_party/SwiftShader/src/Reactor"
+    config_path = root / "BUILD.gn"
+    memory_path = root / "ExecutableMemory.cpp"
+    config = config_path.read_text(encoding="utf-8")
+    memory = memory_path.read_text(encoding="utf-8")
+    if "swiftshader_use_named_mmap" in config and SWIFTSHADER_REACTOR_CONFIG_PATCHED not in config:
+        raise RuntimeError(f"Conflicting SwiftShader named-mmap option in {config_path}")
+    config = replace_swiftshader_source(config, SWIFTSHADER_REACTOR_CONFIG,
+                                       SWIFTSHADER_REACTOR_CONFIG_PATCHED, config_path)
+    for original, patched in SWIFTSHADER_MEMORY_REPLACEMENTS.items():
+        memory = replace_swiftshader_source(memory, original, patched, memory_path)
+    # Validate both files before modifying either; upstream drift must fail closed.
+    config_path.write_text(config, encoding="utf-8")
+    memory_path.write_text(memory, encoding="utf-8")
+    print("Prepared SwiftShader named-mmap option and anonymous JIT allocation")
 
 
 def write_gn_args(args):
@@ -1675,6 +1802,7 @@ def test_windows_swiftshader_patch(test_root):
 
 def self_test(args):
     with tempfile.TemporaryDirectory() as temp:
+        test_swiftshader_named_mmap(Path(temp) / "swiftshader-named-mmap")
         test_windows_sdk_layout(Path(temp) / "windows-sdk-layout")
         test_windows_sdk_installer_resolution()
         test_exact_windows_toolchain(Path(temp) / "windows-toolchain")
@@ -1700,6 +1828,60 @@ def self_test(args):
         ):
             raise AssertionError("Release asset commit output is incorrect")
         print("self-test ok")
+
+
+def test_swiftshader_named_mmap(test_root):
+    path = test_root / "third_party/SwiftShader/src/Reactor/BUILD.gn"
+    path.parent.mkdir(parents=True)
+    original = "# upstream fixture\n" + SWIFTSHADER_REACTOR_CONFIG + "\n"
+    path.write_text(original, encoding="utf-8")
+    memory_path = path.with_name("ExecutableMemory.cpp")
+    memory = "\n".join(SWIFTSHADER_MEMORY_REPLACEMENTS) + "\n"
+    memory_path.write_text(memory, encoding="utf-8")
+    args = argparse.Namespace(source_root=str(test_root))
+    prepare_swiftshader(args)
+    patched = path.read_text(encoding="utf-8")
+    if patched != original.replace(SWIFTSHADER_REACTOR_CONFIG, SWIFTSHADER_REACTOR_CONFIG_PATCHED):
+        raise AssertionError("SwiftShader configuration patch changed unrelated source")
+    prepare_swiftshader(args)
+    if path.read_text(encoding="utf-8") != patched:
+        raise AssertionError("SwiftShader patch is not idempotent")
+    expected_memory = memory
+    for before, after in SWIFTSHADER_MEMORY_REPLACEMENTS.items():
+        expected_memory = expected_memory.replace(before, after)
+    if memory_path.read_text(encoding="utf-8") != expected_memory:
+        raise AssertionError("SwiftShader must allocate and release anonymous mmap pages")
+    for unexpected in (original + original, original.replace("defines =", "defines +=")):
+        path.write_text(unexpected, encoding="utf-8")
+        try:
+            prepare_swiftshader(args)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("Unexpected SwiftShader source was accepted")
+        if path.read_text(encoding="utf-8") != unexpected:
+            raise AssertionError("Failed patch modified SwiftShader source")
+    path.write_text(original, encoding="utf-8")
+    memory_path.write_text("// upstream allocation changed\n", encoding="utf-8")
+    try:
+        prepare_swiftshader(args)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("Unknown JIT allocator was accepted")
+    if path.read_text(encoding="utf-8") != original:
+        raise AssertionError("Allocator validation must precede GN modification")
+    for platform in PLATFORM_GN_ARGS:
+        for arch in ("x64", "arm64"):
+            output = test_root / f"{platform}-{arch}.gn"
+            metadata = output.with_suffix(".json")
+            write_gn_args(argparse.Namespace(platform=platform, arch=arch, output=str(output),
+                                           json_output=str(metadata),
+                                           clang_version=DEFAULT_LINUX_ARM64_LLVM_VERSION))
+            if 'swiftshader_use_named_mmap = false' not in output.read_text(encoding="utf-8"):
+                raise AssertionError("Prebuilt must disable named JIT mappings")
+            if load_json(metadata)["swiftshader_use_named_mmap"] is not False:
+                raise AssertionError("JIT mapping policy missing from archive metadata")
 
 
 def test_swiftshader_packaging(test_root):
@@ -1958,6 +2140,10 @@ def main():
     gn.add_argument("--clang-version", default=DEFAULT_LINUX_ARM64_LLVM_VERSION)
     gn.add_argument("--cc-wrapper", default="")
     gn.set_defaults(func=write_gn_args)
+
+    swiftshader = subparsers.add_parser("prepare-swiftshader")
+    swiftshader.add_argument("--source-root", required=True)
+    swiftshader.set_defaults(func=prepare_swiftshader)
 
     windows_toolchain = subparsers.add_parser("prepare-windows-toolchain")
     windows_toolchain.add_argument("--source-root", required=True)
