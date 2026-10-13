@@ -28,6 +28,7 @@ jobs:
           python3 -m py_compile .github/scripts/angle_ci.py
           python3 -m py_compile .github/scripts/release_channel.py
           python3 .github/scripts/test_release_channel.py
+          python3 .github/scripts/test_manual_dev_release.py
           python3 .github/scripts/angle_ci.py self-test
           python3 -m py_compile .github/scripts/sccache_cache.py
           python3 .github/scripts/test_sccache_cache.py

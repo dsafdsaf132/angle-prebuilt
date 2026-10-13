@@ -1056,6 +1056,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          REPLACE_PUBLISHED_DEV: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'dev' && inputs.artifact_run_id == '' && needs.build.result == 'success' && needs.macos_universal.result == 'success' }}
         run: |
           set -euo pipefail
           tag="$RELEASE_TAG"
@@ -1180,12 +1181,15 @@ jobs:
                 echo "::error::Published release $tag has different source provenance"
                 exit 1
               fi
-              python3 -c 'import json,sys; r=json.load(sys.stdin); expected=sorted(x.split("/",1)[-1] for x in sys.argv[1:]); actual=sorted(a["name"] for a in r.get("assets",[])); assert len(actual)==7 and actual==expected, f"published release asset mismatch: {actual!r}"' "${assets[@]}" <<< "$release_json"
-              ensure_release_tag
-              echo "Release $tag is already published with matching provenance and assets; no changes made"
-              exit 0
+              if [[ "${REPLACE_PUBLISHED_DEV:-false}" != "true" ]]; then
+                python3 -c 'import json,sys; r=json.load(sys.stdin); expected=sorted(x.split("/",1)[-1] for x in sys.argv[1:]); actual=sorted(a["name"] for a in r.get("assets",[])); assert len(actual)==7 and actual==expected, f"published release asset mismatch: {actual!r}"' "${assets[@]}" <<< "$release_json"
+                ensure_release_tag
+                echo "Release $tag is already published with matching provenance and assets; no changes made"
+                exit 0
+              fi
+              echo "Replacing published dev assets after a successful manual build: $tag"
             fi
-            if [[ -n "${RELEASE_MANIFEST_PATH:-}" ]]; then
+            if [[ "$is_draft" == "true" && -n "${RELEASE_MANIFEST_PATH:-}" ]]; then
               if ! release_manifests_match; then
                 echo "::error::Existing draft $tag has different source provenance; refusing to reuse it"
                 exit 1
