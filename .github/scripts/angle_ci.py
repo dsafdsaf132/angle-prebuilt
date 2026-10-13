@@ -451,13 +451,10 @@ def write_gn_args(args):
     gn_args.update(PLATFORM_GN_ARGS[args.platform])
     cc_wrapper = getattr(args, "cc_wrapper", "")
     if cc_wrapper:
-        if args.platform != "win32" or args.arch != "arm64":
-            raise ValueError("Compiler cache pilot is limited to Windows ARM64")
         if '"' in cc_wrapper or "\n" in cc_wrapper or "\r" in cc_wrapper:
             raise ValueError("Invalid compiler wrapper path")
         gn_args["cc_wrapper"] = f'"{cc_wrapper}"'
-        # Keep the initial external-wrapper pilot on Ninja for predictable
-        # execution; leave Siso settings unchanged on all other targets.
+        # External compiler wrappers run through Ninja on every cached target.
         gn_args["use_siso"] = False
     if args.platform == "linux" and args.arch == "arm64":
         clang_version = args.clang_version

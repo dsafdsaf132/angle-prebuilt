@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Retention for the Windows ARM64 compiler-cache pilot only."""
+"""Retain the newest main-branch compiler-cache snapshots for each target."""
 
 import argparse
 import datetime
@@ -9,7 +9,9 @@ import re
 import subprocess
 
 
-CACHE_PREFIX = "sccache-v1-win32-arm64-"
+CACHE_PREFIX = "sccache-v1-"
+CACHE_TARGETS = {f"{platform}-{arch}" for platform in ("linux", "darwin", "win32")
+                 for arch in ("x64", "arm64")}
 CACHE_REF = "refs/heads/main"
 KEEP_SNAPSHOTS = 2
 
@@ -20,10 +22,12 @@ def cache_write_allowed(channel, ref, event):
 
 
 def snapshots_to_delete(caches):
-    owned = []
+    owned = {target: [] for target in CACHE_TARGETS}
     for cache in caches:
+        match = re.fullmatch(re.escape(CACHE_PREFIX) + r"(linux|darwin|win32)-(x64|arm64)-\d+-\d+",
+                             cache.get("key", ""))
         if (cache.get("ref") != CACHE_REF or
-                not re.fullmatch(re.escape(CACHE_PREFIX) + r"\d+-\d+", cache.get("key", ""))):
+                match is None):
             continue
         cache_id = cache.get("id")
         if type(cache_id) is not int or cache_id <= 0:
@@ -31,9 +35,12 @@ def snapshots_to_delete(caches):
         created = datetime.datetime.fromisoformat(cache["created_at"].replace("Z", "+00:00"))
         if created.tzinfo is None:
             raise ValueError("Cache creation time must include a timezone")
-        owned.append((created, cache_id))
-    owned.sort(reverse=True)
-    return [cache_id for _, cache_id in owned[KEEP_SNAPSHOTS:]]
+        owned[f"{match[1]}-{match[2]}"].append((created, cache_id))
+    obsolete = []
+    for target in sorted(owned):
+        snapshots = sorted(owned[target], reverse=True)
+        obsolete.extend(cache_id for _, cache_id in snapshots[KEEP_SNAPSHOTS:])
+    return obsolete
 
 
 def prune():

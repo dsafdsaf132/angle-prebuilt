@@ -30,25 +30,28 @@ Archive filenames use the first 7 characters of the upstream SHA.
 [smoke-passed]: https://img.shields.io/badge/Smoke-passed-brightgreen
 [smoke-skipped]: https://img.shields.io/badge/Smoke-skipped-lightgrey
 
-## Compiler Cache Pilot
+## Compiler Cache
 
-Windows ARM64 uses sccache 0.18.0 with Ninja. The local cache lives in
-`RUNNER_TEMP/sccache`, with a 2 GiB object-cache budget. Direct/preprocessor
+All six platform/architecture targets use sccache 0.18.0 with Ninja. The local
+cache lives in `RUNNER_TEMP/sccache`, with a 512 MiB object-cache budget per
+target. Direct/preprocessor
 caching is disabled to avoid a separate LRU budget. GitHub Actions Cache stores snapshots
-under `sccache-v1-win32-arm64-{run_id}-{run_attempt}`; builds restore the newest
+under `sccache-v1-{platform}-{arch}-{run_id}-{run_attempt}`; builds restore the newest
 matching snapshot without partitioning by source commit or release channel.
 
 Only main-branch stable builds triggered by schedule or manual dispatch write
 the cache. Dev builds use local read-only mode and never save or delete shared
 snapshots; cache misses still compile normally. Consequently, dev cannot warm
 an empty cache. A separate stable-only retention job keeps the newest two main
-snapshots, leaving other caches untouched. Cache restore/save/cleanup failures
+snapshots per target, leaving other caches untouched. The twelve snapshots have
+a nominal total budget of 6 GiB. Cache restore/save/cleanup failures
 do not fail releases. GitHub's repository quota and inactivity eviction still
 apply. Build summaries report cache mode, restored key, hits, misses, and size.
 
-The pilot needs a cold stable build followed by a warm stable build to measure
-actual speedup. Other targets are unchanged; compiler caching does not skip
-linking, packaging, or smoke tests.
+Cache snapshots are saved after successful compilation and statistics reporting,
+before packaging and publishing; release creation is not a prerequisite.
+Compiler caching does not skip linking, packaging, or smoke tests. A cold stable
+build followed by a warm build is required to measure hits and actual speedup.
 
 ## Archive Layout
 
