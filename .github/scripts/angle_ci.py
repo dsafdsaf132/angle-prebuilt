@@ -389,6 +389,11 @@ SWIFTSHADER_REACTOR_CONFIG = '''config("swiftshader_reactor_base_private_config"
   defines = [ "REACTOR_ANONYMOUS_MMAP_NAME=swiftshader_jit" ]
 }'''
 
+SWIFTSHADER_REACTOR_CONFIG_PATTERN = re.compile(
+    r'config\(\s*"swiftshader_reactor_base_private_config"\s*\)\s*\{\s*'
+    r'defines\s*=\s*\[\s*"REACTOR_ANONYMOUS_MMAP_NAME=swiftshader_jit"\s*,?\s*\]\s*\}'
+)
+
 SWIFTSHADER_REACTOR_CONFIG_PATCHED = '''declare_args() {
   # Named mappings aid profiling, but executable memfd pages may be forbidden
   # by the host (for example Android with Termux/proot).
@@ -428,16 +433,29 @@ def replace_swiftshader_source(text, original, patched, path):
     return text.replace(original, patched)
 
 
+def patch_swiftshader_reactor_config(text, path):
+    # Accept formatting differences, but only the known single-definition config.
+    declarations = re.findall(r'config\(\s*"swiftshader_reactor_base_private_config"\s*\)', text)
+    if len(declarations) != 1:
+        raise RuntimeError(f"Unexpected SwiftShader Reactor configuration in {path}")
+    if text.count(SWIFTSHADER_REACTOR_CONFIG_PATCHED) == 1:
+        return text
+    if "swiftshader_use_named_mmap" in text:
+        raise RuntimeError(f"Conflicting SwiftShader named-mmap option in {path}")
+    matches = list(SWIFTSHADER_REACTOR_CONFIG_PATTERN.finditer(text))
+    if len(matches) != 1:
+        raise RuntimeError(f"Unexpected SwiftShader Reactor configuration in {path}")
+    match = matches[0]
+    return text[:match.start()] + SWIFTSHADER_REACTOR_CONFIG_PATCHED + text[match.end():]
+
+
 def prepare_swiftshader(args):
     root = Path(args.source_root) / "third_party/SwiftShader/src/Reactor"
     config_path = root / "BUILD.gn"
     memory_path = root / "ExecutableMemory.cpp"
     config = config_path.read_text(encoding="utf-8")
     memory = memory_path.read_text(encoding="utf-8")
-    if "swiftshader_use_named_mmap" in config and SWIFTSHADER_REACTOR_CONFIG_PATCHED not in config:
-        raise RuntimeError(f"Conflicting SwiftShader named-mmap option in {config_path}")
-    config = replace_swiftshader_source(config, SWIFTSHADER_REACTOR_CONFIG,
-                                       SWIFTSHADER_REACTOR_CONFIG_PATCHED, config_path)
+    config = patch_swiftshader_reactor_config(config, config_path)
     for original, patched in SWIFTSHADER_MEMORY_REPLACEMENTS.items():
         memory = replace_swiftshader_source(memory, original, patched, memory_path)
     # Validate both files before modifying either; upstream drift must fail closed.
@@ -1836,6 +1854,25 @@ def test_swiftshader_named_mmap(test_root):
     memory = "\n".join(SWIFTSHADER_MEMORY_REPLACEMENTS) + "\n"
     memory_path.write_text(memory, encoding="utf-8")
     args = argparse.Namespace(source_root=str(test_root))
+    multiline = '''config("swiftshader_reactor_base_private_config") {
+  defines = [
+    "REACTOR_ANONYMOUS_MMAP_NAME=swiftshader_jit",
+  ]
+}'''
+    for variant in (SWIFTSHADER_REACTOR_CONFIG, multiline,
+                    multiline.replace("  ", "\t").replace("config(", "config( ")):
+        source = "# preserve before\n" + variant + "\n# preserve after\n"
+        path.write_text(source, encoding="utf-8")
+        memory_path.write_text(memory, encoding="utf-8")
+        prepare_swiftshader(args)
+        expected = source.replace(variant, SWIFTSHADER_REACTOR_CONFIG_PATCHED)
+        if path.read_text(encoding="utf-8") != expected:
+            raise AssertionError("Reactor formatting patch changed unrelated source")
+        prepare_swiftshader(args)
+        if path.read_text(encoding="utf-8") != expected:
+            raise AssertionError("Formatted Reactor patch is not idempotent")
+    path.write_text(original, encoding="utf-8")
+    memory_path.write_text(memory, encoding="utf-8")
     prepare_swiftshader(args)
     patched = path.read_text(encoding="utf-8")
     if patched != original.replace(SWIFTSHADER_REACTOR_CONFIG, SWIFTSHADER_REACTOR_CONFIG_PATCHED):
@@ -1848,7 +1885,10 @@ def test_swiftshader_named_mmap(test_root):
         expected_memory = expected_memory.replace(before, after)
     if memory_path.read_text(encoding="utf-8") != expected_memory:
         raise AssertionError("SwiftShader must allocate and release anonymous mmap pages")
-    for unexpected in (original + original, original.replace("defines =", "defines +=")):
+    for unexpected in (original + original, original + multiline,
+                       original.replace("defines =", "defines +="),
+                       multiline.replace('"REACTOR_ANONYMOUS_MMAP_NAME=swiftshader_jit",',
+                                         '"REACTOR_ANONYMOUS_MMAP_NAME=swiftshader_jit", "OTHER",')):
         path.write_text(unexpected, encoding="utf-8")
         try:
             prepare_swiftshader(args)
