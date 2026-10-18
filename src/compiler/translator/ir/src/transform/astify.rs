@@ -833,7 +833,7 @@ fn declare_temp_variable_for_constant_operands(
 fn transform_instruction(
     state: &mut State,
     instruction: &BlockInstruction,
-) -> Vec<traverser::Transform> {
+) -> traverser::Transforms {
     // If the instruction is:
     //
     // - a register, and
@@ -865,8 +865,7 @@ fn transform_instruction(
             state.uncached_but_with_side_effect.insert(id);
         }
 
-        let mut transforms = traverser::Transforms::new();
-        let mut builder = instruction::Builder::new(&mut transforms);
+        let mut builder = instruction::Builder::<traverser::Transforms>::new();
 
         if cache_in_variable_if_necessary {
             let instruction = state.ir_meta.get_instruction(id);
@@ -915,7 +914,7 @@ fn transform_instruction(
             builder.finish()
         }
     } else {
-        vec![]
+        traverser::Transforms::new()
     }
 }
 

@@ -21,6 +21,7 @@
 #include <array>
 #include <fstream>
 
+#include "anglebase/no_destructor.h"
 #include "common/debug.h"
 #include "common/platform.h"
 #include "common/system_utils.h"
@@ -327,6 +328,8 @@ constexpr const char *kSkippedMessages[] = {
     "VUID-VkDescriptorImageInfo-imageView-07796",
     // https://issuetracker.google.com/303441816
     "VUID-VkRenderPassBeginInfo-renderPass-00904",
+    // https://anglebug.com/573315711
+    "VUID-VkRenderPassCreateInfo2-None-10916",
     // http://anglebug.com/42266888
     "VUID-VkMemoryAllocateInfo-allocationSize-01742",
     "VUID-VkMemoryDedicatedAllocateInfo-image-01878",
@@ -7790,18 +7793,24 @@ void Renderer::setGlobalDebugAnnotator(bool *installedAnnotatorOut)
 void Renderer::reloadVolkIfNeeded() const
 {
 #if defined(ANGLE_SHARED_LIBVULKAN)
+    // Volk tracks the currently loaded VkInstance/VkDevice and function pointers in unprotected
+    // global variables, and sets loadedInstance/loadedDevice before populating the function
+    // pointers. Protect the check and reload with a static mutex so concurrent threads (e.g. during
+    // eglMakeCurrent) do not race on Volk globals or observe partially loaded entry points.
+    static angle::base::NoDestructor<angle::SimpleMutex> sVolkMutex;
+    std::unique_lock<angle::SimpleMutex> lock(*sVolkMutex);
+
     if ((mInstance != VK_NULL_HANDLE) && (volkGetLoadedInstance() != mInstance))
     {
         VK_CALL(volkLoadInstance, mInstance);
+        initializeInstanceExtensionEntryPointsFromCore();
     }
 
     if ((mDevice != VK_NULL_HANDLE) && (volkGetLoadedDevice() != mDevice))
     {
         VK_CALL(volkLoadDevice, mDevice);
+        initializeDeviceExtensionEntryPointsFromCore();
     }
-
-    initializeInstanceExtensionEntryPointsFromCore();
-    initializeDeviceExtensionEntryPointsFromCore();
 #endif  // defined(ANGLE_SHARED_LIBVULKAN)
 }
 
