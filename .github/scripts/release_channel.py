@@ -247,17 +247,49 @@ def validate(manifest, archive_metadata):
         raise RuntimeError(f"Release target set mismatch: {sorted(actual)!r}")
 
 
-def github_json(url):
+def github_json(url, payload=None):
     request = urllib.request.Request(
         url,
+        data=json.dumps(payload).encode("utf-8") if payload is not None else None,
         headers={
             "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
             "Accept": "application/vnd.github+json",
             "User-Agent": "ANGLE-Prebuilt-CI/1.0",
+            "Content-Type": "application/json",
         },
     )
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read())
+
+
+def reserve_release_tag(manifest):
+    repository = os.environ["GITHUB_REPOSITORY"]
+    tag = manifest["releaseTag"]
+    ref_url = (
+        f"https://api.github.com/repos/{repository}/git/ref/tags/"
+        f"{urllib.parse.quote(tag, safe='')}"
+    )
+    try:
+        github_json(ref_url)
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        try:
+            github_json(
+                f"https://api.github.com/repos/{repository}/git/refs",
+                {"ref": f"refs/tags/{tag}", "sha": manifest["tagCommit"]},
+            )
+        except urllib.error.HTTPError as creation_error:
+            if creation_error.code != 422:
+                raise
+            # A concurrent run may have reserved the same immutable tag.
+            # Accept that only if the ref now exists; otherwise fail preflight.
+            try:
+                github_json(ref_url)
+            except urllib.error.HTTPError:
+                raise creation_error
+    manifest["tagCommit"] = release_tag_commit(tag, manifest["tagCommit"])
+    return manifest
 
 
 def has_stable_release(repository, upstream_commit):
@@ -338,6 +370,7 @@ def main():
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("resolve-stable")
+    commands.add_parser("reserve-release-tag")
     dev = commands.add_parser("resolve-dev")
     dev.add_argument("--angle-ref", required=True)
     dev.add_argument("--angle-commit", required=True)
@@ -359,6 +392,8 @@ def main():
     elif args.command == "resolve-dev":
         manifest = resolve_dev(vars(args))
         print(json.dumps(manifest, sort_keys=True))
+    elif args.command == "reserve-release-tag":
+        print(json.dumps(reserve_release_tag(json.load(sys.stdin)), sort_keys=True))
     elif args.command == "has-stable-release":
         print("true" if has_stable_release(args.repository, args.upstream_commit) else "false")
     elif args.command == "release-manifests-match":

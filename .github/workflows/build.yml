@@ -70,7 +70,7 @@ jobs:
           EVENT_SCHEDULE: ${{ github.event.schedule || '' }}
           WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion || '' }}
           WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || 'main' }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: |
           set -euo pipefail
           should_build=0
@@ -242,6 +242,11 @@ jobs:
             else
               echo "No recent upstream sync commit found on $target_branch; skipping workflow_run build"
             fi
+          fi
+          if [[ "$should_build" == "1" ]]; then
+            # Reserve the immutable tag while this workflow revision is current.
+            # A long build may outlive later changes to main's workflow files.
+            manifest="$(python3 "$GITHUB_WORKSPACE/.github/scripts/release_channel.py" reserve-release-tag <<< "$manifest")"
           fi
           echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
           echo "build_ref=$build_ref" >> "$GITHUB_OUTPUT"
