@@ -16,7 +16,10 @@ WORKFLOW = Path(__file__).resolve().parents[1] / "workflows/build.yml"
 def run_existing_release(replace=False, draft=False, matching=True, manifest=True, asset_count=7):
     workflow = WORKFLOW.read_text(encoding="utf-8")
     branch = workflow.split('          if [[ -n "$release_json" ]]; then\n', 1)[1]
-    branch = branch.split('\n          else\n            ensure_release_tag\n            create_args=', 1)[0]
+    # Stop at the outer new-release branch without depending on its comments.
+    branch, boundary, _ = branch.partition('\n          else\n            ensure_release_tag\n')
+    if not boundary:
+        raise AssertionError("Could not locate the new-release branch boundary")
     assets = [f"asset-{index}" for index in range(7)]
     release = {"draft": draft, "assets": [{"name": name} for name in assets[:asset_count]]}
     values = {
