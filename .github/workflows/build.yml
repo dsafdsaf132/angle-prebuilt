@@ -381,9 +381,32 @@ jobs:
           channel="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["channel"])' <<< "$ANGLE_RELEASE_MANIFEST")"
           if [[ "$channel" == "stable" ]]; then
             angle_sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["angleCommit"])' <<< "$ANGLE_RELEASE_MANIFEST")"
-            git remote add angle-upstream https://chromium.googlesource.com/angle/angle.git 2>/dev/null || true
-            git fetch --no-tags angle-upstream "$angle_sha"
-            git checkout --detach FETCH_HEAD
+            if ! git cat-file -e "$angle_sha^{commit}" 2>/dev/null; then
+              fetched=0
+              for source_url in \
+                https://chromium.googlesource.com/angle/angle.git \
+                https://github.com/google/angle.git; do
+                for attempt in 1 2 3; do
+                  if git -c http.lowSpeedLimit=1024 -c http.lowSpeedTime=60 \
+                    fetch --no-tags --no-recurse-submodules "$source_url" "$angle_sha"; then
+                    fetched=1
+                    break
+                  fi
+                  echo "::warning::ANGLE fetch failed from $source_url (attempt $attempt/3)"
+                  if [[ "$attempt" -lt 3 ]]; then
+                    sleep $((attempt * 5))
+                  fi
+                done
+                if [[ "$fetched" == "1" ]]; then
+                  break
+                fi
+              done
+              if [[ "$fetched" != "1" ]]; then
+                echo "::error::Could not fetch pinned ANGLE commit $angle_sha from either upstream source"
+                exit 1
+              fi
+            fi
+            git checkout --detach "$angle_sha"
             effective_ref="upstream"
           elif [[ "$ANGLE_BUILD_REF" =~ ^[0-9a-f]{40}$ ]]; then
             git checkout --detach "$ANGLE_BUILD_REF"
@@ -393,6 +416,11 @@ jobs:
           fi
 
           resolved_commit="$(git rev-parse HEAD)"
+          expected_commit="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["angleCommit"])' < "$manifest_file")"
+          if [[ "$resolved_commit" != "$expected_commit" ]]; then
+            echo "::error::Checked out $resolved_commit; expected manifest source $expected_commit"
+            exit 1
+          fi
           echo "ANGLE_REF_EFFECTIVE=$effective_ref" >> "$GITHUB_ENV"
           echo "ANGLE_COMMIT_RESOLVED=$resolved_commit" >> "$GITHUB_ENV"
           echo "ANGLE_RELEASE_MANIFEST=$manifest_file" >> "$GITHUB_ENV"
