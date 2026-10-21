@@ -1240,7 +1240,9 @@ jobs:
             fi
           else
             ensure_release_tag
-            create_args=("$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$RELEASE_TARGET_SHA" --title "$RELEASE_TITLE" --notes-file release-notes.md --draft)
+            # The existing tag is verified above. Omitting target_commitish
+            # avoids a workflow-write permission check against an old commit.
+            create_args=("$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$RELEASE_TITLE" --notes-file release-notes.md --draft)
             if [[ "$RELEASE_CHANNEL" == "dev" ]]; then
               create_args+=(--prerelease)
             fi
