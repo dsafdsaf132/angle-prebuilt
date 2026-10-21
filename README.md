@@ -3,12 +3,16 @@
 This repository tracks upstream [google/ANGLE](https://github.com/google/angle) and publishes ready-to-use archives for
 native EGL/OpenGL ES consumers.
 
-Stable builds follow Chrome Stable and run daily. Dev builds follow upstream and run weekly after the Sunday 00:00 UTC sync.
+Chrome Stable releases are checked daily. Dev builds follow upstream and run weekly after the Sunday 00:00 UTC sync.
 
 Stable selection uses VersionHistory to select the newest Windows Stable version
 that is currently served at 100% rollout. Limited rollout experiments are excluded.
 ChromiumDash supplies the Chromium and ANGLE commits for that exact version;
 resolution fails if a matching release cannot be found.
+
+Stable builds run once per Chrome `major.minor.build` version. Changes only to
+the fourth (patch) number are skipped, even if the ANGLE commit changes. A new
+`major.minor.build` version is built even if it uses the same ANGLE commit.
 
 Each archive records the full upstream SHA in `angle-build.json`.
 

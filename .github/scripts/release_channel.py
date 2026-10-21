@@ -292,7 +292,10 @@ def reserve_release_tag(manifest):
     return manifest
 
 
-def has_stable_release(repository, upstream_commit):
+def has_stable_release(repository, chrome_version):
+    if not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", chrome_version):
+        raise ValueError(f"Invalid Chrome Stable version: {chrome_version!r}")
+    build_version = tuple(map(int, chrome_version.split(".")[:3]))
     page = 1
     while True:
         releases = github_json(
@@ -304,7 +307,12 @@ def has_stable_release(repository, upstream_commit):
             match = re.search(r"^ANGLE-RELEASE-MANIFEST=(\{.*\})$", release.get("body", ""), re.MULTILINE)
             if match:
                 recorded = json.loads(match.group(1))
-                if recorded.get("channel") == "stable" and recorded.get("upstreamCommit") == upstream_commit:
+                recorded_version = recorded.get("chromeVersion", "")
+                if (
+                    recorded.get("channel") == "stable"
+                    and re.fullmatch(r"\d+\.\d+\.\d+\.\d+", recorded_version)
+                    and tuple(map(int, recorded_version.split(".")[:3])) == build_version
+                ):
                     return True
         if len(releases) < 100:
             return False
@@ -377,7 +385,7 @@ def main():
     dev.add_argument("--upstream-commit", required=True)
     stable_check = commands.add_parser("has-stable-release")
     stable_check.add_argument("--repository", required=True)
-    stable_check.add_argument("--upstream-commit", required=True)
+    stable_check.add_argument("--chrome-version", required=True)
     compare = commands.add_parser("release-manifests-match")
     compare.add_argument("--release-json", required=True)
     compare.add_argument("--manifest", required=True)
@@ -395,7 +403,7 @@ def main():
     elif args.command == "reserve-release-tag":
         print(json.dumps(reserve_release_tag(json.load(sys.stdin)), sort_keys=True))
     elif args.command == "has-stable-release":
-        print("true" if has_stable_release(args.repository, args.upstream_commit) else "false")
+        print("true" if has_stable_release(args.repository, args.chrome_version) else "false")
     elif args.command == "release-manifests-match":
         from pathlib import Path
 

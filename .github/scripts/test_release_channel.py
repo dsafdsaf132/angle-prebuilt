@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Regression checks for Stable channel selection."""
 
+import json
 import unittest
+from unittest.mock import patch
 
-from release_channel import select_stable_release, select_stable_version
+from release_channel import has_stable_release, select_stable_release, select_stable_version
 
 
 def history_release(version, fraction=1, end_time=None):
@@ -63,6 +65,50 @@ class StableSelectionTests(unittest.TestCase):
                    release("154.0.8037.93", platform="Mac")]
         with self.assertRaisesRegex(RuntimeError, "matching verified"):
             select_stable_release("154.0.8037.93", records)
+
+
+def published_release(version="154.0.8037.93", channel="stable", **flags):
+    manifest = {"channel": channel, "chromeVersion": version, "upstreamCommit": "a" * 40}
+    return {"body": "ANGLE-RELEASE-MANIFEST=" + json.dumps(manifest), **flags}
+
+
+class StableBuildFrequencyTests(unittest.TestCase):
+    def test_patch_updates_are_skipped_even_with_different_angle_commit(self):
+        with patch("release_channel.github_json", return_value=[published_release()]):
+            for version in ("154.0.8037.93", "154.0.8037.98", "154.0.8037.100"):
+                with self.subTest(version=version):
+                    self.assertTrue(has_stable_release("test/angle", version))
+
+    def test_new_build_branch_is_not_skipped_even_with_same_angle_commit(self):
+        with patch("release_channel.github_json", return_value=[published_release()]):
+            for version in ("154.0.8038.1", "155.0.8037.98", "154.1.8037.98"):
+                with self.subTest(version=version):
+                    self.assertFalse(has_stable_release("test/angle", version))
+
+    def test_only_published_stable_releases_count(self):
+        records = [
+            published_release(draft=True),
+            published_release(prerelease=True),
+            published_release(channel="dev"),
+            published_release(version=""),
+            {"body": "Legacy release without provenance"},
+        ]
+        with patch("release_channel.github_json", return_value=records):
+            self.assertFalse(has_stable_release("test/angle", "154.0.8037.98"))
+
+    def test_published_branch_is_found_on_later_pages(self):
+        with patch("release_channel.github_json", side_effect=[
+            [published_release(version="153.0.8010.1")] * 100,
+            [published_release()],
+        ]) as fetch:
+            self.assertTrue(has_stable_release("test/angle", "154.0.8037.98"))
+            self.assertTrue(fetch.call_args.args[0].endswith("page=2"))
+
+    def test_invalid_requested_version_fails_before_query(self):
+        with patch("release_channel.github_json") as fetch:
+            with self.assertRaisesRegex(ValueError, "Invalid Chrome Stable version"):
+                has_stable_release("test/angle", "154.0.8037")
+            fetch.assert_not_called()
 
 
 if __name__ == "__main__":

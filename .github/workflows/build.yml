@@ -86,8 +86,9 @@ jobs:
             manifest="$(python3 "$GITHUB_WORKSPACE/.github/scripts/release_channel.py" resolve-stable)"
             upstream_commit="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["upstreamCommit"])' <<< "$manifest")"
             build_ref="$upstream_commit"
-            if [[ "$(python3 "$GITHUB_WORKSPACE/.github/scripts/release_channel.py" has-stable-release --repository "$GITHUB_REPOSITORY" --upstream-commit "$upstream_commit")" == "true" ]]; then
-              echo "Stable ANGLE $upstream_commit is already released; skipping"
+            chrome_version="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["chromeVersion"])' <<< "$manifest")"
+            if [[ "$(python3 "$GITHUB_WORKSPACE/.github/scripts/release_channel.py" has-stable-release --repository "$GITHUB_REPOSITORY" --chrome-version "$chrome_version")" == "true" ]]; then
+              echo "Stable Chrome ${chrome_version%.*} already has a published release; skipping patch update $chrome_version"
             else
               should_build=1
             fi
