@@ -5,19 +5,6 @@ native EGL/OpenGL ES consumers.
 
 Chrome Stable releases are checked daily. Dev builds follow upstream and run weekly after the Sunday 00:00 UTC sync.
 
-Stable selection uses VersionHistory to select the newest Windows Stable version
-that is currently served at 100% rollout. Limited rollout experiments are excluded.
-ChromiumDash supplies the Chromium and ANGLE commits for that exact version;
-resolution fails if a matching release cannot be found.
-
-Stable builds run once per Chrome `major.minor.build` version. Changes only to
-the fourth (patch) number are skipped, even if the ANGLE commit changes. A new
-`major.minor.build` version is built even if it uses the same ANGLE commit.
-
-Each archive records the full upstream SHA in `angle-build.json`.
-
-Archive filenames use the first 7 characters of the upstream SHA.
-
 ## Targets
 
 | Target | Archive | CI |
@@ -33,29 +20,6 @@ Archive filenames use the first 7 characters of the upstream SHA.
 [ci-workflow]: https://github.com/dsafdsaf132/angle-prebuilt/actions/workflows/build.yml
 [smoke-passed]: https://img.shields.io/badge/Smoke-passed-brightgreen
 [smoke-skipped]: https://img.shields.io/badge/Smoke-skipped-lightgrey
-
-## Compiler Cache
-
-All six platform/architecture targets use sccache 0.18.0 with Ninja. The local
-cache lives in `RUNNER_TEMP/sccache`, with a 512 MiB object-cache budget per
-target. Direct/preprocessor
-caching is disabled to avoid a separate LRU budget. GitHub Actions Cache stores snapshots
-under `sccache-v1-{platform}-{arch}-{run_id}-{run_attempt}`; builds restore the newest
-matching snapshot without partitioning by source commit or release channel.
-
-Only main-branch stable builds triggered by schedule or manual dispatch write
-the cache. Dev builds use local read-only mode and never save or delete shared
-snapshots; cache misses still compile normally. Consequently, dev cannot warm
-an empty cache. A separate stable-only retention job keeps the newest two main
-snapshots per target, leaving other caches untouched. The twelve snapshots have
-a nominal total budget of 6 GiB. Cache restore/save/cleanup failures
-do not fail releases. GitHub's repository quota and inactivity eviction still
-apply. Build summaries report cache mode, restored key, hits, misses, and size.
-
-Cache snapshots are saved after successful compilation and statistics reporting,
-before packaging and publishing; release creation is not a prerequisite.
-Compiler caching does not skip linking, packaging, or smoke tests. A cold stable
-build followed by a warm build is required to measure hits and actual speedup.
 
 ## Archive Layout
 
