@@ -446,6 +446,12 @@ struct FeaturesVk : FeatureSetBase
         &members,
     };
 
+    FeatureInfo splitCrossFormatLayeredImageCopy = {
+        "splitCrossFormatLayeredImageCopy",
+        FeatureCategory::VulkanWorkarounds,
+        &members,
+    };
+
     FeatureInfo supportsImageFormatList = {
         "supportsImageFormatList",
         FeatureCategory::VulkanFeatures,
@@ -800,6 +806,12 @@ struct FeaturesVk : FeatureSetBase
         &members,
     };
 
+    FeatureInfo supportsExtendedDynamicState3 = {
+        "supportsExtendedDynamicState3",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
     FeatureInfo usePrimitiveRestartEnableDynamicState = {
         "usePrimitiveRestartEnableDynamicState",
         FeatureCategory::VulkanWorkarounds,
@@ -820,6 +832,18 @@ struct FeaturesVk : FeatureSetBase
 
     FeatureInfo supportsLogicOpDynamicState = {
         "supportsLogicOpDynamicState",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsPatchControlPointsDynamicState = {
+        "supportsPatchControlPointsDynamicState",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsAlphaToCoverageEnableDynamicState = {
+        "supportsAlphaToCoverageEnableDynamicState",
         FeatureCategory::VulkanFeatures,
         &members,
     };
@@ -1708,7 +1732,7 @@ struct FeaturesVk : FeatureSetBase
 
     FeatureInfo initializeColorAttachmentWithWhite = {
         "initializeColorAttachmentWithWhite",
-        FeatureCategory::VulkanWorkarounds,
+        FeatureCategory::VulkanAppWorkarounds,
         &members,
     };
 

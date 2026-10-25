@@ -284,12 +284,6 @@ struct FeaturesMtl : FeatureSetBase
         &members,
     };
 
-    FeatureInfo generateShareableShaders = {
-        "generateShareableShaders",
-        FeatureCategory::MetalFeatures,
-        &members,
-    };
-
     FeatureInfo disableMetalOnNvidia = {
         "disableMetalOnNvidia",
         FeatureCategory::MetalFeatures,
@@ -322,18 +316,6 @@ struct FeaturesMtl : FeatureSetBase
 
     FeatureInfo emulateDontCareLoadWithRandomClear = {
         "emulateDontCareLoadWithRandomClear",
-        FeatureCategory::MetalFeatures,
-        &members,
-    };
-
-    FeatureInfo injectAsmStatementIntoLoopBodies = {
-        "injectAsmStatementIntoLoopBodies",
-        FeatureCategory::MetalFeatures,
-        &members,
-    };
-
-    FeatureInfo ensureLoopForwardProgress = {
-        "ensureLoopForwardProgress",
         FeatureCategory::MetalFeatures,
         &members,
     };
