@@ -452,6 +452,12 @@ struct FeaturesVk : FeatureSetBase
         &members,
     };
 
+    FeatureInfo mutableFormatForIntColorImages = {
+        "mutableFormatForIntColorImages",
+        FeatureCategory::VulkanWorkarounds,
+        &members,
+    };
+
     FeatureInfo supportsImageFormatList = {
         "supportsImageFormatList",
         FeatureCategory::VulkanFeatures,
@@ -848,6 +854,42 @@ struct FeaturesVk : FeatureSetBase
         &members,
     };
 
+    FeatureInfo supportsAlphaToOneEnableDynamicState = {
+        "supportsAlphaToOneEnableDynamicState",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsDepthClampEnableDynamicState = {
+        "supportsDepthClampEnableDynamicState",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsDepthClipNegativeOneToOneDynamicState = {
+        "supportsDepthClipNegativeOneToOneDynamicState",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsLogicOpEnableDynamicState = {
+        "supportsLogicOpEnableDynamicState",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsPolygonModeDynamicState = {
+        "supportsPolygonModeDynamicState",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsSampleMaskDynamicState = {
+        "supportsSampleMaskDynamicState",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
     FeatureInfo supportsFragmentShadingRate = {
         "supportsFragmentShadingRate",
         FeatureCategory::VulkanFeatures,
@@ -1010,8 +1052,8 @@ struct FeaturesVk : FeatureSetBase
         &members,
     };
 
-    FeatureInfo syncMonolithicPipelinesToBlobCache = {
-        "syncMonolithicPipelinesToBlobCache",
+    FeatureInfo syncGlobalPipelineCacheToBlobCache = {
+        "syncGlobalPipelineCacheToBlobCache",
         FeatureCategory::VulkanWorkarounds,
         &members,
     };
@@ -1762,6 +1804,24 @@ struct FeaturesVk : FeatureSetBase
 
     FeatureInfo supportsClFp64 = {
         "supportsClFp64",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsPipelineBinary = {
+        "supportsPipelineBinary",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo preferPipelineBinaries = {
+        "preferPipelineBinaries",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo allowPipelineBinariesForTesting = {
+        "allowPipelineBinariesForTesting",
         FeatureCategory::VulkanFeatures,
         &members,
     };
