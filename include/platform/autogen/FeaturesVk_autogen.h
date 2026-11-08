@@ -872,6 +872,12 @@ struct FeaturesVk : FeatureSetBase
         &members,
     };
 
+    FeatureInfo supportsLineRasterizationModeDynamicState = {
+        "supportsLineRasterizationModeDynamicState",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
     FeatureInfo supportsLogicOpEnableDynamicState = {
         "supportsLogicOpEnableDynamicState",
         FeatureCategory::VulkanFeatures,
@@ -880,6 +886,12 @@ struct FeaturesVk : FeatureSetBase
 
     FeatureInfo supportsPolygonModeDynamicState = {
         "supportsPolygonModeDynamicState",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsRasterizationSamplesDynamicState = {
+        "supportsRasterizationSamplesDynamicState",
         FeatureCategory::VulkanFeatures,
         &members,
     };
@@ -1618,12 +1630,6 @@ struct FeaturesVk : FeatureSetBase
 
     FeatureInfo supportsSwapchainMutableFormat = {
         "supportsSwapchainMutableFormat",
-        FeatureCategory::VulkanFeatures,
-        &members,
-    };
-
-    FeatureInfo supportsClipCullDistanceInGSAndTS = {
-        "supportsClipCullDistanceInGSAndTS",
         FeatureCategory::VulkanFeatures,
         &members,
     };

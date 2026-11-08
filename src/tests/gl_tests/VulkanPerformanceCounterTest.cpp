@@ -1444,7 +1444,6 @@ TEST_P(VulkanPerformanceCounterTest, MutableTexture3DCompatibleMipLevelsNonCubeI
 
     std::vector<GLColor> mip0Color(4 * 2 * 2, GLColor::red);
     std::vector<GLColor> mip1Color(2 * 1 * 1, GLColor::red);
-    std::vector<GLColor> mip2Color(1 * 1 * 1, GLColor::red);
 
     GLTexture texture1;
     glBindTexture(GL_TEXTURE_3D, texture1);
@@ -1898,9 +1897,9 @@ TEST_P(VulkanPerformanceCounterTest_ES31, MultisampleResolveWithBlit)
                            0);
     ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
 
-    ANGLE_GL_PROGRAM(gradientProgram, essl31_shaders::vs::Passthrough(),
-                     essl31_shaders::fs::RedGreenGradient());
-    drawQuad(gradientProgram, essl31_shaders::PositionAttrib(), 0.5f, 1.0f, true);
+    ANGLE_GL_PROGRAM(gradientProgram, essl1_shaders::vs::Passthrough(),
+                     essl1_shaders::fs::RedGreenGradient());
+    drawQuad(gradientProgram, essl1_shaders::PositionAttrib(), 0.5f, 1.0f, true);
     ASSERT_GL_NO_ERROR();
 
     // Create another FBO to resolve the multisample buffer into.

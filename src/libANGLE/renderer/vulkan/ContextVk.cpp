@@ -859,6 +859,7 @@ ContextVk::ContextVk(const gl::State &state, gl::ErrorSet *errorSet, vk::Rendere
       mCurrentGraphicsPipelineShaders(nullptr),
       mCurrentComputePipeline(nullptr),
       mCurrentDrawMode(gl::PrimitiveMode::Unused1),
+      mCurrentRasterizationSamples(0),
       mCurrentWindowSurface(nullptr),
       mCurrentRotationDrawFramebuffer(SurfaceRotation::Identity),
       mCurrentRotationReadFramebuffer(SurfaceRotation::Identity),
@@ -1893,50 +1894,14 @@ angle::Result ContextVk::setupIndexedDraw(const gl::Context *context,
             mLastIndexBufferOffset = indices;
         }
 
-        // When you draw with LineLoop mode or GL_UNSIGNED_BYTE type, we may allocate its own
-        // element buffer and modify mCurrentElementArrayBuffer. When we switch out of that draw
-        // mode, we must reset mCurrentElementArrayBuffer back to the vertexArray's element buffer.
-        // Since in either case we set DIRTY_BIT_INDEX_BUFFER dirty bit, we use this bit to re-sync
+        // When you draw with LineLoop mode, we may allocate its own element buffer and modify
+        // mCurrentElementArrayBuffer. When we switch out of that draw mode, we must reset
+        // mCurrentElementArrayBuffer back to the vertexArray's element buffer.  Since in either
+        // case we set DIRTY_BIT_INDEX_BUFFER dirty bit, we use this bit to re-sync
         // mCurrentElementArrayBuffer.
         if (mGraphicsDirtyBits[DIRTY_BIT_INDEX_BUFFER])
         {
             vertexArrayVk->updateCurrentElementArrayBuffer();
-        }
-
-        if (shouldConvertUint8VkIndexType(indexType))
-        {
-            if (mGraphicsDirtyBits[DIRTY_BIT_INDEX_BUFFER])
-            {
-                ANGLE_VK_PERF_WARNING(
-                    this, GL_DEBUG_SEVERITY_LOW,
-                    "Potential inefficiency emulating uint8 vertex attributes due to "
-                    "lack of hardware support");
-
-                BufferVk *bufferVk             = vk::GetImpl(elementArrayBuffer);
-                vk::BufferHelper &bufferHelper = bufferVk->getBuffer();
-
-                if (bufferHelper.isHostVisible() &&
-                    mRenderer->hasResourceUseFinished(bufferHelper.getResourceUse()))
-                {
-                    uint8_t *src = nullptr;
-                    ANGLE_TRY(
-                        bufferVk->mapForReadAccessOnly(this, reinterpret_cast<void **>(&src)));
-                    // Note: bufferOffset is not added here because mapImpl already adds it.
-                    ANGLE_UNSAFE_TODO(src += reinterpret_cast<uintptr_t>(indices));
-                    const size_t byteCount = static_cast<size_t>(elementArrayBuffer->getSize()) -
-                                             reinterpret_cast<uintptr_t>(indices);
-                    BufferBindingDirty bindingDirty;
-                    ANGLE_TRY(vertexArrayVk->convertIndexBufferCPU(this, indexType, byteCount, src,
-                                                                   &bindingDirty));
-                    ANGLE_TRY(bufferVk->unmapReadAccessOnly(this));
-                }
-                else
-                {
-                    ANGLE_TRY(vertexArrayVk->convertIndexBufferGPU(this, bufferVk, indices));
-                }
-            }
-
-            mCurrentIndexBufferOffset = 0;
         }
     }
 
@@ -4468,18 +4433,6 @@ angle::Result ContextVk::multiDrawElementsIndirectHelper(const gl::Context *cont
         return angle::Result::Continue;
     }
 
-    if (shouldConvertUint8VkIndexType(type) && mGraphicsDirtyBits[DIRTY_BIT_INDEX_BUFFER])
-    {
-        ANGLE_VK_PERF_WARNING(
-            this, GL_DEBUG_SEVERITY_LOW,
-            "Potential inefficiency emulating uint8 vertex attributes due to lack "
-            "of hardware support");
-
-        ANGLE_TRY(vertexArrayVk->convertIndexBufferIndirectGPU(
-            this, currentIndirectBuf, currentIndirectBufOffset, &currentIndirectBuf));
-        currentIndirectBufOffset = 0;
-    }
-
     // If the line-loop handling function modifies the element array buffer in the vertex array,
     // there is a possibility that the modified version is used as a source for the next line-loop
     // draw, which can lead to errors. To avoid this, a local index buffer pointer is used to pass
@@ -5258,13 +5211,20 @@ void ContextVk::updateSampleShadingWithRasterizationSamples(const uint32_t raste
 // rasterization sample should be updated.
 void ContextVk::updateRasterizationSamples(const uint32_t rasterizationSamples)
 {
-    uint32_t prevSampleCount = mGraphicsPipelineDesc->getRasterizationSamples();
+    uint32_t prevSampleCount = mCurrentRasterizationSamples;
     updateFrameBufferFetchSamples(prevSampleCount, rasterizationSamples);
-    mGraphicsPipelineDesc->updateRasterizationSamples(&mGraphicsPipelineTransition,
-                                                      rasterizationSamples);
     updateSampleShadingWithRasterizationSamples(rasterizationSamples);
     updateSampleMaskWithRasterizationSamples(rasterizationSamples);
     updateAlphaToCoverageWithRasterizationSamples(rasterizationSamples);
+
+    // If rasterization samples is using dynamic state, it's automatically set once at the beginning
+    // of the render pass.
+    if (!mRenderer->getFeatures().supportsRasterizationSamplesDynamicState.enabled)
+    {
+        mGraphicsPipelineDesc->updateRasterizationSamples(&mGraphicsPipelineTransition,
+                                                          rasterizationSamples);
+    }
+    mCurrentRasterizationSamples = rasterizationSamples;
 }
 
 void ContextVk::updateRasterizerDiscardEnabled(bool isPrimitivesGeneratedQueryActive)
@@ -5475,6 +5435,30 @@ angle::Result ContextVk::invalidateProgramExecutableHelper(const gl::Context *co
         mNonIndexedDirtyBitsMask.set(DIRTY_BIT_VERTEX_BUFFERS, useVertexBuffer);
         mIndexedDirtyBitsMask.set(DIRTY_BIT_VERTEX_BUFFERS, useVertexBuffer);
         resetCurrentGraphicsPipeline();
+
+        // Only the gl_ClipDistance output of the last pre-rasterization stage is clipped against.
+        // The values written by the earlier stages are only observable by the following stages
+        // (through gl_in). Let the shaders know which stage is the last one, so that only that
+        // stage zeroes out the disabled clip distances.
+        sh::vk::LastPreRasterizationStage lastPreRasterizationStage =
+            sh::vk::LastPreRasterizationStage::Vertex;
+        switch (gl::GetLastPreFragmentStage(executable->getLinkedShaderStages()))
+        {
+            case gl::ShaderType::Geometry:
+                lastPreRasterizationStage = sh::vk::LastPreRasterizationStage::Geometry;
+                break;
+            case gl::ShaderType::TessEvaluation:
+                lastPreRasterizationStage =
+                    sh::vk::LastPreRasterizationStage::TessellationEvaluation;
+                break;
+            default:
+                break;
+        }
+        if (mGraphicsDriverUniforms.updateLastPreRasterizationStage(
+                static_cast<uint32_t>(lastPreRasterizationStage)))
+        {
+            mGraphicsDirtyBits.set(DIRTY_BIT_DRIVER_UNIFORMS);
+        }
 
         const vk::FramebufferFetchMode framebufferFetchMode =
             vk::GetProgramFramebufferFetchMode(executable);
@@ -5743,14 +5727,6 @@ angle::Result ContextVk::syncState(const gl::Context *context,
                     mGraphicsPipelineDesc->updatePrimitiveRestartEnabled(
                         &mGraphicsPipelineTransition, glState.isPrimitiveRestartEnabled());
                 }
-                // Additionally set the index buffer dirty if conversion from uint8 might have been
-                // necessary.  Otherwise if primitive restart is enabled and the index buffer is
-                // translated to uint16_t with a value of 0xFFFF, it cannot be reused when primitive
-                // restart is disabled.
-                if (!mRenderer->getFeatures().supportsIndexTypeUint8.enabled)
-                {
-                    mGraphicsDirtyBits.set(DIRTY_BIT_INDEX_BUFFER);
-                }
                 break;
             case gl::state::DIRTY_BIT_CLEAR_COLOR:
                 mClearColorValue.color.float32[0] = glState.getColorClearValue().red;
@@ -5899,10 +5875,20 @@ angle::Result ContextVk::syncState(const gl::Context *context,
                 break;
             case gl::state::DIRTY_BIT_VERTEX_ARRAY_BINDING:
             {
-                gl::AttributesMask staleDefaultAttribsMask =
-                    vertexArrayVk->getCurrentDefaultAttribsMask() &
-                    ~programExecutable->getAttributesMask();
-                vertexArrayVk->syncDirtyDisabledAttribs(this, staleDefaultAttribsMask);
+                // The default attribute buffers cached in the newly bound vertex array are
+                // suballocated from mStreamedVertexBuffers, which may have been reallocated (and
+                // the old BufferHelpers freed) while this vertex array was not bound.  Reset all of
+                // them to the empty buffer; the active ones are reallocated by
+                // handleDirtyGraphicsDefaultAttribs() before they are used.
+                //
+                // Note that the active ones cannot be left stale in anticipation of that update:
+                // the state may be synced without a draw (e.g. a multi-draw where every draw is a
+                // no-op), and the program may change before the next draw.  In that case,
+                // handleDirtyGraphicsDefaultAttribs() skips attributes that are not used by the new
+                // program, while the vertex buffers handler still binds (and tracks) every
+                // attribute up to the program's max active attribute location.
+                vertexArrayVk->syncDirtyDisabledAttribs(
+                    this, vertexArrayVk->getCurrentDefaultAttribsMask());
                 invalidateDefaultAttributes(context->getActiveDefaultAttribsMask());
                 ANGLE_TRY(onVertexArrayChange(vertexArrayVk->getCurrentEnabledAttribsMask()));
                 ANGLE_TRY(onIndexBufferChange(vertexArrayVk->getCurrentElementArrayBuffer()));
@@ -6639,8 +6625,7 @@ angle::Result ContextVk::onFramebufferChange(FramebufferVk *framebufferVk, gl::C
     onRenderPassFinished(RenderPassClosureReason::FramebufferChange);
 
     // Ensure that the pipeline description is updated.
-    if (mGraphicsPipelineDesc->getRasterizationSamples() !=
-        static_cast<uint32_t>(framebufferVk->getSamples()))
+    if (mCurrentRasterizationSamples != static_cast<uint32_t>(framebufferVk->getSamples()))
     {
         updateRasterizationSamples(framebufferVk->getSamples());
     }
@@ -8072,6 +8057,45 @@ angle::Result ContextVk::beginNewRenderPass(
         ASSERT(mCurrentGraphicsPipeline->valid());
         mCurrentGraphicsPipeline->retainInRenderPass(mRenderPassCommands);
     }
+
+    // Set all dynamic state that is constant throughout the render pass:
+    //
+    // - Bresenham lines
+    // - Rasterization samples
+    // - TODO(http://anglebug.com/575891833): other state such as provoking vertex, tessellation
+    //   domain, sample locations, and anything else that is not configurable in GLES.
+    if (mRenderer->getFeatures().supportsLineRasterizationModeDynamicState.enabled)
+    {
+        // VUID-vkCmdDraw-None-10608:
+        //
+        // > If ... the current lineRasterizationMode is VK_LINE_RASTERIZATION_MODE_BRESENHAM ...,
+        // > then the current alphaToCoverageEnable, alphaToOneEnable and sampleShadingEnable states
+        // > must all be VK_FALSE
+        //
+        // So we cannot use bresenham lines under those conditions.  Additionally, bresenham lines
+        // should not be used when multisampling (http://anglebug.com/42262723):
+        //
+        // > When Bresenham lines are being rasterized, sample locations may all be treated as being
+        // > at the pixel center
+        //
+        // ANGLE already disables alpha to coverage and alpha to one when the render pass is
+        // single-sampled, and sample shading doesn't apply in that case either.  So all that really
+        // needs to be done here is to disable Bresenham lines if multisampling.
+        (*commandBufferOut)
+            ->setLineRasterizationMode(renderPassDesc.samples() > 1
+                                           ? VK_LINE_RASTERIZATION_MODE_DEFAULT
+                                           : VK_LINE_RASTERIZATION_MODE_BRESENHAM);
+        if (mRenderer->supportsStippledLines())
+        {
+            (*commandBufferOut)->setLineStippleEnable(VK_FALSE);
+        }
+    }
+    if (mRenderer->getFeatures().supportsRasterizationSamplesDynamicState.enabled)
+    {
+        (*commandBufferOut)
+            ->setRasterizationSamples(static_cast<VkSampleCountFlagBits>(renderPassDesc.samples()));
+    }
+
     return angle::Result::Continue;
 }
 
@@ -8431,9 +8455,7 @@ void ContextVk::dumpCommandStreamDiagnostics()
 void ContextVk::initIndexTypeMap()
 {
     // Init gles-vulkan index type map
-    mIndexTypeMap[gl::DrawElementsType::UnsignedByte] =
-        mRenderer->getFeatures().supportsIndexTypeUint8.enabled ? VK_INDEX_TYPE_UINT8_EXT
-                                                                : VK_INDEX_TYPE_UINT16;
+    mIndexTypeMap[gl::DrawElementsType::UnsignedByte]  = VK_INDEX_TYPE_UINT8;
     mIndexTypeMap[gl::DrawElementsType::UnsignedShort] = VK_INDEX_TYPE_UINT16;
     mIndexTypeMap[gl::DrawElementsType::UnsignedInt]   = VK_INDEX_TYPE_UINT32;
 }
@@ -8445,19 +8467,10 @@ VkIndexType ContextVk::getVkIndexType(gl::DrawElementsType glIndexType) const
 
 size_t ContextVk::getVkIndexTypeSize(gl::DrawElementsType glIndexType) const
 {
-    gl::DrawElementsType elementsType = shouldConvertUint8VkIndexType(glIndexType)
-                                            ? gl::DrawElementsType::UnsignedShort
-                                            : glIndexType;
-    ASSERT(elementsType < gl::DrawElementsType::EnumCount);
+    ASSERT(glIndexType < gl::DrawElementsType::EnumCount);
 
     // Use GetDrawElementsTypeSize() to get the size
-    return static_cast<size_t>(gl::GetDrawElementsTypeSize(elementsType));
-}
-
-bool ContextVk::shouldConvertUint8VkIndexType(gl::DrawElementsType glIndexType) const
-{
-    return (glIndexType == gl::DrawElementsType::UnsignedByte &&
-            !mRenderer->getFeatures().supportsIndexTypeUint8.enabled);
+    return static_cast<size_t>(gl::GetDrawElementsTypeSize(glIndexType));
 }
 
 angle::Result ContextVk::flushAndSubmitOutsideRenderPassCommands(QueueSubmitReason reason)
@@ -9352,9 +9365,21 @@ angle::Result ContextVk::onVertexArrayChange(const gl::AttributesMask dirtyAttri
 
     if (ANGLE_UNLIKELY(mCurrentTransformFeedbackQueueSerial.valid()))
     {
+        // Only enabled non-streamed attributes need to be checked, as only they source their data
+        // from GL buffer objects, which may have been written by transform feedback.  Default
+        // attributes and streamed attributes (client memory or emulated divisor) use internal
+        // buffers suballocated from mStreamedVertexBuffers, which are written by the host.  (The
+        // GL buffer of an emulated divisor attribute is read on the CPU when streamed, which
+        // already waits for any pending GPU write.)  Additionally, mStreamedVertexBuffers may have
+        // been reallocated (and the old BufferHelpers freed) since the streamed attributes were
+        // last streamed, e.g. while the vertex array was not bound, so their buffers must not be
+        // accessed until they are streamed again by setupDraw().
+        const gl::AttributesMask enabledNonStreamingAttribDirtyBits =
+            dirtyAttribBits & vertexArray.getCurrentEnabledAttribsMask() &
+            ~vertexArray.getStreamingVertexAttribsMask();
         const gl::AttribArray<vk::BufferHelper *> &buffers = vertexArray.getCurrentArrayBuffers();
         bool breakRenderPass                               = false;
-        for (size_t attribIndex : dirtyAttribBits)
+        for (size_t attribIndex : enabledNonStreamingAttribDirtyBits)
         {
             ASSERT(buffers[attribIndex] != nullptr);
             if (buffers[attribIndex]->writtenByCommandBuffer(mCurrentTransformFeedbackQueueSerial))

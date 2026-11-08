@@ -752,7 +752,6 @@ class ContextVk : public ContextImpl, public vk::Context, public MultisampleText
 
     VkIndexType getVkIndexType(gl::DrawElementsType glIndexType) const;
     size_t getVkIndexTypeSize(gl::DrawElementsType glIndexType) const;
-    bool shouldConvertUint8VkIndexType(gl::DrawElementsType glIndexType) const;
 
     bool isRobustResourceInitEnabled() const;
     bool hasRobustAccess() const { return mState.hasRobustAccess(); }
@@ -1528,6 +1527,7 @@ class ContextVk : public ContextImpl, public vk::Context, public MultisampleText
     vk::PipelineHelper *mCurrentGraphicsPipelineShaders;
     vk::PipelineHelper *mCurrentComputePipeline;
     gl::PrimitiveMode mCurrentDrawMode;
+    uint32_t mCurrentRasterizationSamples;
 
     WindowSurfaceVk *mCurrentWindowSurface;
     // Records the current rotation of the surface (draw/read) framebuffer, derived from
