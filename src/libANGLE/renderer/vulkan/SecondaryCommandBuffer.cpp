@@ -826,9 +826,9 @@ void SecondaryCommandBuffer::executeCommands(PrimaryCommandBuffer *primary)
                 {
                     const SetColorBlendEnableParams *params =
                         getParamPtr<SetColorBlendEnableParams>(currentCommand);
-                    const VkBool32 *colorBlendEnable = GetFirstArrayParameter<VkBool32>(params);
-                    vkCmdSetColorBlendEnableEXT(cmdBuffer, params->firstAttachment,
-                                                params->attachmentCount, colorBlendEnable);
+                    const VkBool32 colorBlendEnable = params->colorBlendEnable;
+                    vkCmdSetColorBlendEnableEXT(cmdBuffer, params->attachment, 1,
+                                                &colorBlendEnable);
                     break;
                 }
                 case CommandID::SetColorBlendEquation:
@@ -845,10 +845,9 @@ void SecondaryCommandBuffer::executeCommands(PrimaryCommandBuffer *primary)
                 {
                     const SetColorWriteMaskParams *params =
                         getParamPtr<SetColorWriteMaskParams>(currentCommand);
-                    const VkColorComponentFlags *colorWriteMask =
-                        GetFirstArrayParameter<VkColorComponentFlags>(params);
-                    vkCmdSetColorWriteMaskEXT(cmdBuffer, params->firstAttachment,
-                                              params->attachmentCount, colorWriteMask);
+                    const VkColorComponentFlags colorWriteMask =
+                        static_cast<VkColorComponentFlags>(params->colorWriteMask);
+                    vkCmdSetColorWriteMaskEXT(cmdBuffer, params->attachment, 1, &colorWriteMask);
                     break;
                 }
                 case CommandID::SetCullMode:

@@ -175,10 +175,6 @@ constexpr uint32_t kPreferredDefaultUniformBufferSize = 64 * 1024u;
 // buffers will be larger.
 constexpr size_t kAllocationCountThresholdForDynamicVertexDataSize = 4096;
 
-// Maximum size to use VMA image suballocation. Any allocation greater than or equal to this
-// value will use a dedicated VkDeviceMemory.
-constexpr size_t kImageSizeThresholdForDedicatedMemoryAllocation = 8 * 1024 * 1024;
-
 // Maximum size for an allocated memory for a single object.
 constexpr VkDeviceSize kMemoryAllocationSizeLimit = 1 * 1024 * 1024 * 1024;
 
@@ -240,6 +236,24 @@ bool IsQualcommOpenSource(uint32_t vendorId, uint32_t driverId, const char *devi
     return strstr(deviceName, "Venus") != nullptr || strstr(deviceName, "Turnip") != nullptr;
 }
 
+bool IsXclipse()
+{
+    if (!IsAndroid())
+    {
+        return false;
+    }
+
+    std::string modelName;
+    if (!angle::android::GetSystemProperty(angle::android::kModelSystemPropertyName, &modelName))
+    {
+        return 0;
+    }
+
+    // Improve this when more Xclipse devices are available
+    return strstr(modelName.c_str(), "SM-S901B") != nullptr ||
+           strstr(modelName.c_str(), "SM-S926B") != nullptr;
+}
+
 bool StrLess(const char *a, const char *b)
 {
     return strcmp(a, b) < 0;
@@ -296,8 +310,6 @@ constexpr const char *kSkippedMessages[] = {
     "VUID-VkDescriptorImageInfo-descriptorType-06713",
     // http://crbug.com/1412096
     "VUID-VkImageCreateInfo-pNext-00990",
-    // VVL bug: https://gitlab.khronos.org/vulkan/Vulkan-ValidationLayers/-/merge_requests/582
-    "VUID-VkGraphicsPipelineCreateInfo-externalFormatResolve-09309",
     // Spec bug: https://gitlab.khronos.org/vulkan/vulkan/-/merge_requests/8706
     "VUID-vkCmdDraw-None-09363",
     "VUID-vkCmdDrawIndexed-None-09363",
@@ -2138,6 +2150,7 @@ OneOffCommandPool::OneOffCommandPool() : mProtectionType(vk::ProtectionType::Inv
 void OneOffCommandPool::init(vk::ProtectionType protectionType)
 {
     ASSERT(!mCommandPool.valid());
+    ASSERT(mPendingCommands.empty());
     mProtectionType = protectionType;
 }
 
@@ -2148,6 +2161,7 @@ void OneOffCommandPool::destroy(VkDevice device)
     {
         pending.commandBuffer.releaseHandle();
     }
+    mPendingCommands.clear();
     mCommandPool.destroy(device);
     mProtectionType = vk::ProtectionType::InvalidEnum;
 }
@@ -2288,6 +2302,7 @@ void Renderer::onDestroy(vk::ErrorContext *context)
     }
 
     (void)(finishResourceUse(context, mSubmittedResourceUse));
+    mSubmittedResourceUse.reset();
 
     if (mPlaceHolderDescriptorSetLayout)
     {
@@ -2466,12 +2481,17 @@ angle::Result Renderer::enableInstanceExtensions(vk::ErrorContext *context,
                                            instanceExtensionNames) &&
                                 useVulkanSwapchain == UseVulkanSwapchain::Yes);
 
+    const bool isSamsungDeviceWithSurfacelessQueryBug = IsXclipse() && GetAndroidSDKVersion() < 36;
+
     // TODO: Validation layer has a bug when vkGetPhysicalDeviceSurfaceFormats2KHR is called
     // on Mock ICD with surface handle set as VK_NULL_HANDLE. http://anglebug.com/42266098
+    // b/267953710: VK_GOOGLE_surfaceless_query isn't working on some Samsung Xclipse builds with
+    // Android API level below 36.
     ANGLE_FEATURE_CONDITION(
         &mFeatures, supportsSurfacelessQueryExtension,
         ExtensionFound(VK_GOOGLE_SURFACELESS_QUERY_EXTENSION_NAME, instanceExtensionNames) &&
-            useVulkanSwapchain == UseVulkanSwapchain::Yes && !isMockICDEnabled());
+            useVulkanSwapchain == UseVulkanSwapchain::Yes && !isMockICDEnabled() &&
+            !isSamsungDeviceWithSurfacelessQueryBug);
 
     // VK_KHR_external_fence_capabilities and VK_KHR_extenral_semaphore_capabilities are promoted to
     // core in Vulkan 1.1
@@ -2961,9 +2981,9 @@ angle::Result Renderer::initializeMemoryAllocator(vk::ErrorContext *context)
         ASSERT(mTileMemoyTypeIndex != kInvalidMemoryTypeIndex);
     }
 
-    // The preferred heap block size was picked by looking at memory usage of
-    // Android apps. The allocator will start making blocks at 1/8 the max size
-    // and builds up block size as needed before capping at the max set here.
+    // The preferred heap block size was picked by looking at memory usage of Android apps. Buffer
+    // pools start with a smaller initial block, and double the block size as needed up to the size
+    // set here.
     mPreferredLargeHeapBlockSize = 8 * 1024 * 1024;
 
     // The first allocated buffer block from an empty buffer pool has a smaller size in order to
@@ -3123,21 +3143,24 @@ angle::Result Renderer::initializeMemoryAllocator(vk::ErrorContext *context)
 //                                                                                       (property)
 // - VK_EXT_primitive_topology_list_restart:          primitiveTopologyListRestart (feature)
 // - VK_EXT_extended_dynamic_state3:                  extendedDynamicState3AlphaToCoverageEnable
-//                                                                                       (feature)
+//                                                                                        (feature)
 //                                                    extendedDynamicState3AlphaToOneEnable
-//                                                                                       (feature)
+//                                                                                        (feature)
+//                                                    extendedDynamicState3ColorBlendEnable
+//                                                                                        (feature)
+//                                                    extendedDynamicState3ColorWriteMask (feature)
 //                                                    extendedDynamicState3DepthClampEnable
-//                                                                                       (feature)
+//                                                                                        (feature)
 //                                                    extendedDynamicState3DepthClipNegativeOneToOne
-//                                                                                       (feature)
+//                                                                                        (feature)
 //                                                    extendedDynamicState3LineRasterizationMode
-//                                                                                       (feature)
+//                                                                                        (feature)
 //                                                    extendedDynamicState3LineStippleEnable
-//                                                                                       (feature)
+//                                                                                        (feature)
 //                                                    extendedDynamicState3LogicOpEnable (feature)
 //                                                    extendedDynamicState3PolygonMode (feature)
 //                                                    extendedDynamicState3RasterizationSamples
-//                                                                                       (feature)
+//                                                                                        (feature)
 //                                                    extendedDynamicState3SampleMask (feature)
 //                                                    dynamicPrimitiveTopologyUnrestricted
 //                                                                                       (property)
@@ -5557,19 +5580,11 @@ gl::Version Renderer::getMaxSupportedESVersion() const
     // Verify minimum requirements of ANGLE:
     //
     // - VK_KHR_image_format_list
-    // - VK_KHR_index_type_uint8 or VK_EXT_index_type_uint8
     //
-    if (!mFeatures.supportsImageFormatList.enabled || !mFeatures.supportsIndexTypeUint8.enabled)
+    if (!mFeatures.supportsImageFormatList.enabled)
     {
         WARN() << "Vulkan device does not meet ANGLE's minimum requirements";
-        if (!mFeatures.supportsImageFormatList.enabled)
-        {
-            WARN() << "  Missing VK_KHR_image_format_list";
-        }
-        if (!mFeatures.supportsIndexTypeUint8.enabled)
-        {
-            WARN() << "  Missing VK_EXT_index_type_uint8 or VK_KHR_index_type_uint8";
-        }
+        WARN() << "  Missing VK_KHR_image_format_list";
         maxVersion = LimitVersionTo(maxVersion, {0, 0});
     }
 
@@ -6324,6 +6339,8 @@ void Renderer::initFeatures(const vk::ExtensionNameList &deviceExtensionNames,
                             isQualcommProprietary && (isAdreno622 || isAdreno702));
     ANGLE_FEATURE_CONDITION(&mFeatures, mutableFormatForIntColorImages,
                             isQualcommProprietary && (isAdreno622 || isAdreno702));
+    ANGLE_FEATURE_CONDITION(&mFeatures, avoidRelaxedPrecisionOnIntegers,
+                            isQualcommProprietary && (isAdreno622 || isAdreno702));
 
     ANGLE_FEATURE_CONDITION(
         &mFeatures, supportsImageFormatList,
@@ -6796,6 +6813,18 @@ void Renderer::initFeatures(const vk::ExtensionNameList &deviceExtensionNames,
             mExtendedDynamicState3Features.extendedDynamicState3AlphaToOneEnable == VK_TRUE &&
             isRasterizerDiscardDynamicState && !hasStaticBresenhamLineState && !isPowerVR);
 
+    ANGLE_FEATURE_CONDITION(
+        &mFeatures, supportsColorBlendEnableDynamicState,
+        mFeatures.supportsExtendedDynamicState3.enabled &&
+            mExtendedDynamicState3Features.extendedDynamicState3ColorBlendEnable == VK_TRUE &&
+            isRasterizerDiscardDynamicState);
+
+    ANGLE_FEATURE_CONDITION(
+        &mFeatures, supportsColorWriteMaskDynamicState,
+        mFeatures.supportsExtendedDynamicState3.enabled &&
+            mExtendedDynamicState3Features.extendedDynamicState3ColorWriteMask == VK_TRUE &&
+            isRasterizerDiscardDynamicState);
+
     // Disabled on Imagination drivers due to failure of a few dEQP tests.
     ANGLE_FEATURE_CONDITION(
         &mFeatures, supportsDepthClampEnableDynamicState,
@@ -7015,22 +7044,26 @@ void Renderer::initFeatures(const vk::ExtensionNameList &deviceExtensionNames,
 
     // To avoid memory bloating due to using pipeline caches per program, the pipeline cache in the
     // renderer can be used.
+    // Also explicitly prefer the global cache (otherwise, it will be used implicitly):
+    // - when warm up is disabled - program's cache will be empty at draw time, in which case using
+    //   global cache is better.
+    // - when skipping serialization - to avoid creating per program caches unnecessarily.
     ANGLE_FEATURE_CONDITION(&mFeatures, preferGlobalPipelineCache,
-                            isNvidia || (isAMD && !isRADV) || isSamsung || isQualcommProprietary);
+                            !mFeatures.warmUpPipelineCacheAtLink.enabled ||
+                                mFeatures.skipPipelineCacheSerialization.enabled || isNvidia ||
+                                (isAMD && !isRADV) || isSamsung || isQualcommProprietary);
 
     // Whether the pipeline caches should merge into the global pipeline cache.  This should only be
     // enabled on platforms if:
     //
-    // - preferGlobalPipelineCache is not enabled
-    // - VK_EXT_graphics_pipeline_library is not supported.  In that case, only the program's cache
-    //   used during warm up is merged into the global cache for later monolithic pipeline creation.
+    // - allowProgramPipelineCache() is true
     // - VK_EXT_graphics_pipeline_library is supported, monolithic pipelines are preferred, and the
     //   driver is able to reuse blobs from partial pipelines when creating monolithic pipelines.
     ANGLE_FEATURE_CONDITION(&mFeatures, mergeProgramPipelineCachesToGlobalCache,
-                            !mFeatures.preferGlobalPipelineCache.enabled &&
-                                (!mFeatures.supportsGraphicsPipelineLibrary.enabled ||
-                                 (mFeatures.preferMonolithicPipelinesOverLibraries.enabled &&
-                                  libraryBlobsAreReusedByMonolithicPipelines)));
+                            allowProgramPipelineCache() &&
+                                mFeatures.supportsGraphicsPipelineLibrary.enabled &&
+                                mFeatures.preferMonolithicPipelinesOverLibraries.enabled &&
+                                libraryBlobsAreReusedByMonolithicPipelines);
 
     // Whether all accesses to pipeline cache need to be externally synchronized. This should only
     // be enabled on platforms if:
@@ -7051,22 +7084,20 @@ void Renderer::initFeatures(const vk::ExtensionNameList &deviceExtensionNames,
     // Sync global pipeline cache to the blob cache occasionally on platforms that would benefit
     // from it:
     //
-    // - VK_EXT_graphics_pipeline_library is not supported, and the program cache is not warmed up:
-    //   If the pipeline cache is being warmed up at link time, the blobs corresponding to each
-    //   program is individually retrieved and stored in the blob cache already.
+    // - the program pipeline cache use is not allowed (only allowed when warmed up):
+    //   If the program pipeline cache is being warmed up at link time, the blobs corresponding to
+    //   each program is individually retrieved and stored in the blob cache already.
     // - VK_EXT_graphics_pipeline_library is supported, but monolithic pipelines are still
     //   preferred, and the cost of syncing the large cache is acceptable.
     //
     // Otherwise global pipeline cache is recreated on every run.
-    const bool hasNoPipelineWarmUp = !mFeatures.supportsGraphicsPipelineLibrary.enabled &&
-                                     !mFeatures.warmUpPipelineCacheAtLink.enabled;
     const bool canSyncLargeMonolithicCache =
         mFeatures.supportsGraphicsPipelineLibrary.enabled &&
         mFeatures.preferMonolithicPipelinesOverLibraries.enabled &&
         (!IsAndroid() || mFeatures.enableAsyncPipelineCacheCompression.enabled);
     ANGLE_FEATURE_CONDITION(&mFeatures, syncGlobalPipelineCacheToBlobCache,
                             !mFeatures.skipPipelineCacheSerialization.enabled &&
-                                (hasNoPipelineWarmUp || canSyncLargeMonolithicCache));
+                                (!allowProgramPipelineCache() || canSyncLargeMonolithicCache));
 
     // Enable the feature on Samsung by default, because it has big blob cache.
     ANGLE_FEATURE_CONDITION(&mFeatures, useDualPipelineBlobCacheSlots, isSamsung);
@@ -8722,9 +8753,10 @@ VkResult ImageMemorySuballocator::getDefaultMemoryPool(Renderer *renderer,
                              getDefaultPoolBlockSize(renderer), poolMemoryTypeIndex, poolOut);
 }
 
-bool ImageMemorySuballocator::needsDedicatedMemory(VkDeviceSize size) const
+bool ImageMemorySuballocator::needsDedicatedMemory(Renderer *renderer, VkDeviceSize size) const
 {
-    return size >= kImageSizeThresholdForDedicatedMemoryAllocation;
+    // Like VMA's default pools, images over half a block get dedicated memory to avoid waste.
+    return size > getDefaultPoolBlockSize(renderer) / 2;
 }
 
 VkDeviceSize ImageMemorySuballocator::getInitialPoolBlockSize(Renderer *renderer,
@@ -8733,7 +8765,7 @@ VkDeviceSize ImageMemorySuballocator::getInitialPoolBlockSize(Renderer *renderer
     return renderer->getPreferredInitialImageBlockSize(poolMemoryTypeIndex);
 }
 
-VkDeviceSize ImageMemorySuballocator::getDefaultPoolBlockSize(Renderer *renderer)
+VkDeviceSize ImageMemorySuballocator::getDefaultPoolBlockSize(Renderer *renderer) const
 {
     return renderer->getPreferredLargeHeapBlockSize();
 }

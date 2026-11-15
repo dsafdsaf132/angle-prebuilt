@@ -93,7 +93,7 @@ class ImageMemorySuballocator : angle::NonCopyable
                                               VkMemoryPropertyFlags flags);
 
     // Determines if dedicated memory is required for the allocation.
-    bool needsDedicatedMemory(VkDeviceSize size) const;
+    bool needsDedicatedMemory(Renderer *renderer, VkDeviceSize size) const;
 
     // Initializes a custom memory pool with a specific type index (if needed) and returns it.
     VkResult getInitMemoryPool(Renderer *renderer, uint32_t poolMemoryTypeIndex, Pool **poolOut);
@@ -109,7 +109,7 @@ class ImageMemorySuballocator : angle::NonCopyable
 
     // Gets the block size for a specific memory pool.
     VkDeviceSize getInitialPoolBlockSize(Renderer *renderer, uint32_t poolMemoryTypeIndex);
-    VkDeviceSize getDefaultPoolBlockSize(Renderer *renderer);
+    VkDeviceSize getDefaultPoolBlockSize(Renderer *renderer) const;
 
     // Initial memory pools are smaller and have a max block count. If allocation fails on them, the
     // allocator moves to the default memory pools.
@@ -295,6 +295,7 @@ class Renderer : angle::NonCopyable
     const angle::FeaturesVk &getFeatures() const { return mFeatures; }
     uint32_t getMaxVertexAttribDivisor() const { return mMaxVertexAttribDivisor; }
     VkDeviceSize padVertexAttribBufferSizeIfNeeded(VkDeviceSize bufferSize);
+    gl::DrawBufferMask getValidDrawBuffers() const { return mValidDrawBuffers; }
     uint32_t getMaxColorInputAttachmentCount() const { return mMaxColorInputAttachmentCount; }
     ANGLE_INLINE bool isInFlightCommandsEmpty() const
     {
@@ -412,6 +413,14 @@ class Renderer : angle::NonCopyable
                                    vk::PipelineCacheAccess *pipelineCacheOut);
     angle::Result mergeIntoPipelineCache(vk::ErrorContext *context,
                                          const vk::PipelineCache &pipelineCache);
+
+    // Whether it is allowed to use program's pipeline cache, otherwise need to use mPipelineCache.
+    bool allowProgramPipelineCache() const
+    {
+        return !mFeatures.preferGlobalPipelineCache.enabled &&
+               mFeatures.warmUpPipelineCacheAtLink.enabled &&
+               !mFeatures.skipPipelineCacheSerialization.enabled;
+    }
 
     const std::vector<const char *> &getSkippedValidationMessages() const
     {
@@ -987,6 +996,7 @@ class Renderer : angle::NonCopyable
     uint32_t mCurrentQueueFamilyIndex;
     uint32_t mMaxVertexAttribDivisor;
     VkDeviceSize mMaxVertexAttribStride;
+    mutable gl::DrawBufferMask mValidDrawBuffers;
     mutable uint32_t mMaxColorInputAttachmentCount;
     uint32_t mDefaultUniformBufferSize;
     VkDevice mDevice;

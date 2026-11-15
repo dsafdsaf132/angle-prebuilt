@@ -11416,3 +11416,267 @@ ANGLE_INSTANTIATE_TEST_ES3_AND(
     FramebufferTest_RecreateFboOnAttachmentRespecification,
     ES3_OPENGL().enable(Feature::RecreateFboOnAttachmentRespecification),
     ES3_OPENGLES().enable(Feature::RecreateFboOnAttachmentRespecification));
+
+class LargeRenderbufferTest : public ANGLETest<>
+{
+  protected:
+    LargeRenderbufferTest()
+    {
+        setWindowWidth(16);
+        setWindowHeight(16);
+        setConfigRedBits(8);
+        setConfigGreenBits(8);
+        setConfigBlueBits(8);
+        setConfigAlphaBits(8);
+    }
+};
+
+// Test allocating a 16384x16384 RGBA32F renderbuffer (4 GiB) whose 32-bit byte size wraps to 0 on
+// some drivers. Either GL_OUT_OF_MEMORY / GL_INVALID_OPERATION (from ANGLE's maxTextureBytes limit)
+// is generated, or the renderbuffer can be rendered to.
+TEST_P(LargeRenderbufferTest, RGBA32F16384)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_color_buffer_float"));
+
+    constexpr GLsizei kSize   = 16384;
+    GLint maxRenderbufferSize = 0;
+    glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &maxRenderbufferSize);
+    ANGLE_SKIP_TEST_IF(maxRenderbufferSize < kSize);
+
+    GLRenderbuffer rb;
+    glBindRenderbuffer(GL_RENDERBUFFER, rb);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA32F, kSize, kSize);
+    GLenum err = glGetError();
+    if (err == GL_OUT_OF_MEMORY || err == GL_INVALID_OPERATION)
+    {
+        return;
+    }
+    ASSERT_GLENUM_EQ(GL_NO_ERROR, err);
+
+    GLFramebuffer fbo;
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rb);
+    ASSERT_GL_NO_ERROR();
+    ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+    constexpr GLsizei kDrawSize = 16;
+    glViewport(0, 0, kDrawSize, kDrawSize);
+    glScissor(0, 0, kDrawSize, kDrawSize);
+    glEnable(GL_SCISSOR_TEST);
+    ANGLE_GL_PROGRAM(program, essl1_shaders::vs::Simple(), essl1_shaders::fs::Green());
+    drawQuad(program, essl1_shaders::PositionAttrib(), 0.5f);
+    err = glGetError();
+    if (err == GL_OUT_OF_MEMORY)
+    {
+        return;
+    }
+    ASSERT_GLENUM_EQ(GL_NO_ERROR, err);
+    EXPECT_PIXEL_32F_EQ(0, 0, 0.0f, 1.0f, 0.0f, 1.0f);
+}
+
+// Test allocating a 16385x16385 DEPTH_COMPONENT24 renderbuffer whose power-of-two-rounded 32-bit
+// byte size wraps to 0 on some drivers. Either GL_OUT_OF_MEMORY / GL_INVALID_OPERATION (from
+// ANGLE's maxTextureBytes limit on backends with a 1 GiB cap) is generated, or the renderbuffer
+// can be rendered to as a depth target.
+TEST_P(LargeRenderbufferTest, DepthComponent24NPOT16385)
+{
+    constexpr GLsizei kSize   = 16385;
+    GLint maxRenderbufferSize = 0;
+    glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &maxRenderbufferSize);
+    ANGLE_SKIP_TEST_IF(maxRenderbufferSize < kSize);
+
+    GLRenderbuffer depthRb;
+    glBindRenderbuffer(GL_RENDERBUFFER, depthRb);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, kSize, kSize);
+    GLenum err = glGetError();
+    if (getEGLWindow()->isFeatureEnabled(Feature::RejectRenderbufferStorageWrappingDriverSize))
+    {
+        ASSERT_GLENUM_EQ(GL_OUT_OF_MEMORY, err);
+        return;
+    }
+    if (err == GL_OUT_OF_MEMORY || err == GL_INVALID_OPERATION)
+    {
+        return;
+    }
+    ASSERT_GLENUM_EQ(GL_NO_ERROR, err);
+
+    constexpr GLsizei kDrawSize = 16;
+    GLRenderbuffer colorRb;
+    glBindRenderbuffer(GL_RENDERBUFFER, colorRb);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, kDrawSize, kDrawSize);
+    ASSERT_GL_NO_ERROR();
+
+    GLFramebuffer fbo;
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, colorRb);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRb);
+    ASSERT_GL_NO_ERROR();
+    ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+    glViewport(0, 0, kDrawSize, kDrawSize);
+    glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+    glClearDepthf(0.5f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+
+    ANGLE_GL_PROGRAM(greenProgram, essl1_shaders::vs::Simple(), essl1_shaders::fs::Green());
+    drawQuad(greenProgram, essl1_shaders::PositionAttrib(), -0.5f);
+
+    ANGLE_GL_PROGRAM(blueProgram, essl1_shaders::vs::Simple(), essl1_shaders::fs::Blue());
+    drawQuad(blueProgram, essl1_shaders::PositionAttrib(), 0.5f);
+
+    err = glGetError();
+    if (err == GL_OUT_OF_MEMORY)
+    {
+        return;
+    }
+    ASSERT_GLENUM_EQ(GL_NO_ERROR, err);
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(LargeRenderbufferTest);
+ANGLE_INSTANTIATE_TEST_ES3_AND(
+    LargeRenderbufferTest,
+    ES3_OPENGL().enable(Feature::RejectRenderbufferStorageWrappingDriverSize),
+    ES3_OPENGLES().enable(Feature::RejectRenderbufferStorageWrappingDriverSize));
+
+class FlushBeforeDrawFboChangeTest : public ANGLETest<>
+{
+  protected:
+    FlushBeforeDrawFboChangeTest()
+    {
+        setWindowWidth(8);
+        setWindowHeight(8);
+        setConfigRedBits(8);
+        setConfigGreenBits(8);
+        setConfigBlueBits(8);
+        setConfigAlphaBits(8);
+    }
+};
+
+// Verify chained MRT draws where the second framebuffer has four color attachments plus depth and
+// samples a rendered color attachment from a three-color plus combined depth-stencil framebuffer
+// without an explicit client flush between passes.
+TEST_P(FlushBeforeDrawFboChangeTest, SampledMultiAttachmentTransition)
+{
+    GLint maxColorAttachments = 0;
+    GLint maxDrawBuffers      = 0;
+    glGetIntegerv(GL_MAX_COLOR_ATTACHMENTS, &maxColorAttachments);
+    glGetIntegerv(GL_MAX_DRAW_BUFFERS, &maxDrawBuffers);
+    ANGLE_SKIP_TEST_IF(maxColorAttachments < 4 || maxDrawBuffers < 4);
+
+    constexpr GLsizei kSize   = 8;
+    constexpr char kVS[]      = R"(#version 300 es
+void main() {
+    vec2 p = vec2((gl_VertexID == 1) ? 3.0 : -1.0,
+                  (gl_VertexID == 2) ? 3.0 : -1.0);
+    gl_Position = vec4(p, 0.0, 1.0);
+})";
+    constexpr char kFSPrime[] = R"(#version 300 es
+precision highp float;
+layout(location = 0) out vec4 c0;
+layout(location = 1) out vec4 c1;
+layout(location = 2) out vec4 c2;
+void main() {
+    c0 = vec4(1.0, 0.0, 0.0, 1.0);
+    c1 = vec4(0.0, 1.0, 0.0, 1.0);
+    c2 = vec4(0.0, 0.0, 1.0, 1.0);
+})";
+    constexpr char kFSNext[]  = R"(#version 300 es
+precision highp float;
+uniform sampler2D sourceTex;
+layout(location = 0) out vec4 c0;
+layout(location = 1) out vec4 c1;
+layout(location = 2) out vec4 c2;
+layout(location = 3) out vec4 c3;
+void main() {
+    vec4 s = texelFetch(sourceTex, ivec2(gl_FragCoord.xy), 0);
+    c0 = vec4(s.r, 1.0, 0.0, 1.0);
+    c1 = vec4(0.0, 1.0, 1.0, 1.0);
+    c2 = vec4(1.0, 0.0, 1.0, 1.0);
+    c3 = vec4(1.0, 1.0, 1.0, 1.0);
+})";
+
+    ANGLE_GL_PROGRAM(primeProg, kVS, kFSPrime);
+    ANGLE_GL_PROGRAM(nextProg, kVS, kFSNext);
+
+    GLFramebuffer fboB;
+    std::array<GLTexture, 4> colorsB;
+    GLTexture depthB;
+    glBindFramebuffer(GL_FRAMEBUFFER, fboB);
+    for (size_t i = 0; i < colorsB.size(); ++i)
+    {
+        glBindTexture(GL_TEXTURE_2D, colorsB[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kSize, kSize, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     nullptr);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, static_cast<GLenum>(GL_COLOR_ATTACHMENT0 + i),
+                               GL_TEXTURE_2D, colorsB[i], 0);
+    }
+    glBindTexture(GL_TEXTURE_2D, depthB);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, kSize, kSize, 0, GL_DEPTH_COMPONENT,
+                 GL_UNSIGNED_INT, nullptr);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthB, 0);
+    constexpr std::array<GLenum, 4> kDrawBufs4 = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1,
+                                                  GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3};
+    glDrawBuffers(static_cast<GLsizei>(kDrawBufs4.size()), kDrawBufs4.data());
+    ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+    GLFramebuffer fboA;
+    std::array<GLTexture, 3> colorsA;
+    GLTexture depthStencilA;
+    glBindFramebuffer(GL_FRAMEBUFFER, fboA);
+    for (size_t i = 0; i < colorsA.size(); ++i)
+    {
+        glBindTexture(GL_TEXTURE_2D, colorsA[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kSize, kSize, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     nullptr);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, static_cast<GLenum>(GL_COLOR_ATTACHMENT0 + i),
+                               GL_TEXTURE_2D, colorsA[i], 0);
+    }
+    glBindTexture(GL_TEXTURE_2D, depthStencilA);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, kSize, kSize, 0, GL_DEPTH_STENCIL,
+                 GL_UNSIGNED_INT_24_8, nullptr);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D,
+                           depthStencilA, 0);
+    constexpr std::array<GLenum, 3> kDrawBufs3 = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1,
+                                                  GL_COLOR_ATTACHMENT2};
+    glDrawBuffers(static_cast<GLsizei>(kDrawBufs3.size()), kDrawBufs3.data());
+    ASSERT_GL_FRAMEBUFFER_COMPLETE(GL_FRAMEBUFFER);
+
+    GLVertexArray vao;
+    glBindVertexArray(vao);
+    glViewport(0, 0, kSize, kSize);
+
+    glUseProgram(primeProg);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    ASSERT_GL_NO_ERROR();
+
+    glBindFramebuffer(GL_FRAMEBUFFER, fboB);
+    glDrawBuffers(static_cast<GLsizei>(kDrawBufs4.size()), kDrawBufs4.data());
+    glUseProgram(nextProg);
+    GLint sourceLoc = glGetUniformLocation(nextProg, "sourceTex");
+    ASSERT_NE(-1, sourceLoc);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, colorsA[0]);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glUniform1i(sourceLoc, 0);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    ASSERT_GL_NO_ERROR();
+
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::yellow);
+    glReadBuffer(GL_COLOR_ATTACHMENT1);
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::cyan);
+    glReadBuffer(GL_COLOR_ATTACHMENT2);
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::magenta);
+    glReadBuffer(GL_COLOR_ATTACHMENT3);
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::white);
+    ASSERT_GL_NO_ERROR();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(FlushBeforeDrawFboChangeTest);
+ANGLE_INSTANTIATE_TEST_ES3_AND(FlushBeforeDrawFboChangeTest,
+                               ES3_OPENGL().enable(Feature::FlushBeforeDrawFramebufferChange),
+                               ES3_OPENGLES().enable(Feature::FlushBeforeDrawFramebufferChange));

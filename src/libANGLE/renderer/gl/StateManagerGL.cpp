@@ -1878,6 +1878,12 @@ void StateManagerGL::useProgram(GLuint program)
 
 void StateManagerGL::forceUseProgram(GLuint program)
 {
+    // glUseProgram generates GL_INVALID_OPERATION while the current transform feedback is active
+    // and not paused, which would leave mState.program out of sync with the native state.  Pause
+    // it first; syncTransformFeedbackState() resumes it on the next draw if it is still unpaused
+    // in the frontend.
+    pauseTransformFeedback();
+
     mState.program = program;
     mFunctions->useProgram(program);
     mLocalDirtyBits.set(gl::state::DIRTY_BIT_PROGRAM_BINDING);
@@ -2139,6 +2145,14 @@ angle::Result StateManagerGL::setPixelPackBuffer(const gl::Context *context,
 
 void StateManagerGL::bindFramebuffer(GLenum type, GLuint framebuffer)
 {
+    if (type != GL_READ_FRAMEBUFFER && mState.framebuffers[angle::FramebufferBindingDraw] != 0 &&
+        mState.framebuffers[angle::FramebufferBindingDraw] != framebuffer &&
+        mFeatures.flushBeforeDrawFramebufferChange.enabled)
+    {
+        // Flush pending rendering on the outgoing draw framebuffer while still bound.
+        forcefullyFlush();
+    }
+
     bool framebufferChanged = false;
     switch (type)
     {
@@ -2386,9 +2400,8 @@ void StateManagerGL::updateDispatchIndirectBufferBinding(const gl::Context *cont
 
 void StateManagerGL::pauseTransformFeedback()
 {
-    if (mCurrentTransformFeedback != nullptr)
+    if (mCurrentTransformFeedback != nullptr && mCurrentTransformFeedback->syncPausedState(true))
     {
-        mCurrentTransformFeedback->syncPausedState(true);
         onTransformFeedbackStateChange();
     }
 }

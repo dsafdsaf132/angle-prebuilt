@@ -3372,14 +3372,17 @@ void GraphicsPipelineDesc::initDefaults(const ErrorContext *context,
 
     if (GraphicsPipelineHasFragmentOutput(subset))
     {
-        constexpr VkFlags kAllColorBits = (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                           VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
+        const VkFlags defaultColorWriteMask =
+            context->getRenderer()->getFeatures().supportsColorWriteMaskDynamicState.enabled
+                ? 0
+                : VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
+                      VK_COLOR_COMPONENT_A_BIT;
 
         for (uint32_t colorIndexGL = 0; colorIndexGL < gl::IMPLEMENTATION_MAX_DRAW_BUFFERS;
              ++colorIndexGL)
         {
             Int4Array_Set(mFragmentOutput.blend.colorWriteMaskBits.data(), colorIndexGL,
-                          kAllColorBits);
+                          defaultColorWriteMask);
         }
 
         PackedColorBlendAttachmentState blendAttachmentState;
@@ -4158,8 +4161,16 @@ void GraphicsPipelineDesc::initializePipelineFragmentOutputState(
             VK_PIPELINE_COLOR_BLEND_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_BIT_EXT;
     }
 
-    const gl::DrawBufferMask blendEnableMask(
-        mFragmentOutput.blendMaskAndLogic.bits.blendEnableMask);
+    // If blend-enable is dynamic state, we cannot tell which attachments might need blending later
+    // so static state for blend equation/function must be set for all attachments of the render
+    // pass.
+    // TODO(http://anglebug.com/575891833): When blend equation/function is also dynamic state,
+    // there is no need to set any static blend state (unless advanced blend is not dynamic), in
+    // which case this mask could be zero instead.
+    const gl::DrawBufferMask staticBlendMask =
+        context->getFeatures().supportsColorBlendEnableDynamicState.enabled
+            ? gl::DrawBufferMask().set()
+            : gl::DrawBufferMask(mFragmentOutput.blendMaskAndLogic.bits.blendEnableMask);
 
     // Zero-init all states.
     stateOut->blendAttachmentState = {};
@@ -4174,7 +4185,7 @@ void GraphicsPipelineDesc::initializePipelineFragmentOutputState(
     {
         VkPipelineColorBlendAttachmentState &state = stateOut->blendAttachmentState[colorIndexGL];
 
-        if (blendEnableMask[colorIndexGL])
+        if (staticBlendMask[colorIndexGL])
         {
             // To avoid triggering valid usage error, blending must be disabled for formats that do
             // not have VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT feature bit set.
@@ -4194,7 +4205,10 @@ void GraphicsPipelineDesc::initializePipelineFragmentOutputState(
                 if (packedBlendState.colorBlendOp <= static_cast<uint8_t>(VK_BLEND_OP_MAX) ||
                     context->getFeatures().supportsBlendOperationAdvanced.enabled)
                 {
-                    state.blendEnable = VK_TRUE;
+                    if (!context->getFeatures().supportsColorBlendEnableDynamicState.enabled)
+                    {
+                        state.blendEnable = VK_TRUE;
+                    }
                     UnpackBlendAttachmentState(packedBlendState, &state);
                 }
             }
@@ -4214,6 +4228,14 @@ void GraphicsPipelineDesc::initializePipelineFragmentOutputState(
 
     // Dynamic state
     dynamicStateListOut->push_back(VK_DYNAMIC_STATE_BLEND_CONSTANTS);
+    if (context->getFeatures().supportsColorBlendEnableDynamicState.enabled)
+    {
+        dynamicStateListOut->push_back(VK_DYNAMIC_STATE_COLOR_BLEND_ENABLE_EXT);
+    }
+    if (context->getFeatures().supportsColorWriteMaskDynamicState.enabled)
+    {
+        dynamicStateListOut->push_back(VK_DYNAMIC_STATE_COLOR_WRITE_MASK_EXT);
+    }
     if (context->getFeatures().supportsLogicOpDynamicState.enabled)
     {
         dynamicStateListOut->push_back(VK_DYNAMIC_STATE_LOGIC_OP_EXT);
@@ -4417,27 +4439,6 @@ void GraphicsPipelineDesc::updateSampleShading(GraphicsPipelineTransitionBits *t
     }
 
     transition->set(ANGLE_GET_TRANSITION_BIT(mSharedNonVertexInput.multisample.bits));
-}
-
-void GraphicsPipelineDesc::setSingleBlend(uint32_t colorIndexGL,
-                                          bool enabled,
-                                          VkBlendOp op,
-                                          VkBlendFactor srcFactor,
-                                          VkBlendFactor dstFactor)
-{
-    mFragmentOutput.blendMaskAndLogic.bits.blendEnableMask |=
-        static_cast<uint8_t>(1 << colorIndexGL);
-
-    PackedColorBlendAttachmentState &blendAttachmentState =
-        mFragmentOutput.blend.attachments[colorIndexGL];
-
-    SetBitField(blendAttachmentState.colorBlendOp, op);
-    SetBitField(blendAttachmentState.alphaBlendOp, op);
-
-    SetBitField(blendAttachmentState.srcColorBlendFactor, srcFactor);
-    SetBitField(blendAttachmentState.dstColorBlendFactor, dstFactor);
-    SetBitField(blendAttachmentState.srcAlphaBlendFactor, VK_BLEND_FACTOR_ZERO);
-    SetBitField(blendAttachmentState.dstAlphaBlendFactor, VK_BLEND_FACTOR_ONE);
 }
 
 void GraphicsPipelineDesc::updateBlendEnabled(GraphicsPipelineTransitionBits *transition,
@@ -7184,6 +7185,7 @@ VkResult PipelineCacheAccess::getCacheData(vk::ErrorContext *context,
 void PipelineCacheAccess::merge(Renderer *renderer, const vk::PipelineCache &pipelineCache)
 {
     ASSERT(isThreadSafe());
+    ASSERT(pipelineCache.valid() && pipelineCache.getHandle() != mPipelineCache->getHandle());
 
     std::unique_lock<angle::SimpleMutex> lock = getLock();
 
