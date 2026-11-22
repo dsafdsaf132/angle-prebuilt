@@ -188,8 +188,9 @@ union SwapchainImageFramebufferDesc final
 {
     struct
     {
-        uint8_t framebufferFetchMode : 4;
+        uint8_t framebufferFetchMode : 3;
         uint8_t writeControlMode : 4;
+        uint8_t isLegacyDitherEnabled : 1;
     };
     FramebufferIndex index;
 };
@@ -331,11 +332,10 @@ class WindowSurfaceVk : public SurfaceVk
                                      GLenum binding,
                                      const gl::ImageIndex &imageIndex) override;
 
-    vk::Framebuffer &chooseFramebuffer();
-
     angle::Result getCurrentFramebuffer(ContextVk *context,
                                         vk::FramebufferFetchMode fetchMode,
                                         gl::SrgbWriteControlMode writeControlMode,
+                                        bool isLegacyDitherEnabled,
                                         const vk::RenderPass &compatibleRenderPass,
                                         vk::Framebuffer *framebufferOut);
 
@@ -485,6 +485,10 @@ class WindowSurfaceVk : public SurfaceVk
     bool isMultisampledSurface() const;
     bool hasAncillaryColor() const;
 
+    vk::Framebuffer &chooseFramebuffer(vk::FramebufferFetchMode fetchMode,
+                                       gl::SrgbWriteControlMode writeControlMode,
+                                       bool isLegacyDitherEnabled);
+
     bool supportsPresentMode(vk::PresentMode presentMode) const;
 
     bool updateColorSpace(ThreadSafeDisplayVk *displayVk);
@@ -556,12 +560,14 @@ class WindowSurfaceVk : public SurfaceVk
     vk::ImageViewHelper mDepthStencilImageViews;
     angle::ObserverBinding mDepthStencilImageBinding;
 
-    // Ancillary color image, view and framebuffer, if multisampling or preserved swap behavior is
-    // enabled.
+    // Ancillary color image, view and framebuffers, if multisampling or preserved swap behavior is
+    // enabled.  Like with swapchain images, there is one framebuffer per framebuffer fetch, sRGB
+    // write control, and legacy dither mode, as they are created with different (incompatible)
+    // render passes.
     vk::ImageHelper mAncillaryColorImage;
     vk::ImageViewHelper mAncillaryColorImageViews;
     angle::ObserverBinding mAncillaryColorImageBinding;
-    vk::Framebuffer mAncillaryFramebuffer;
+    impl::SwapchainImageFramebuffers mAncillaryFramebuffers;
     // Pre-transform the ancillary color image was created with.
     // The image (and its preserved contents) can only be reused across swapchain recreation if this
     // is unchanged.
@@ -584,12 +590,6 @@ class WindowSurfaceVk : public SurfaceVk
 
     // EGL_KHR_partial_update
     bool mIsBufferAgeQueried;
-
-    // GL_EXT_sRGB_write_control
-    gl::SrgbWriteControlMode mWriteControlMode = gl::SrgbWriteControlMode::Default;
-
-    // GL_EXT_shader_framebuffer_fetch
-    vk::FramebufferFetchMode mFramebufferFetchMode = vk::FramebufferFetchMode::None;
 
     vk::Renderer *mRenderer;
 };
